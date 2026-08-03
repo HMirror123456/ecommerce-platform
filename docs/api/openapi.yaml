@@ -1,0 +1,567 @@
+openapi: 3.0.3
+info:
+  title: 电商平台 API
+  description: |
+    3 人小组项目共用接口契约。修改接口请先改本文档，再实现前后端。
+    业务术语见 docs/BUSINESS_GLOSSARY.md，状态机见 docs/domain/DOMAIN_MODEL.md
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080/api
+    description: 本地开发（端口按实际后端调整）
+
+tags:
+  - name: auth
+    description: 认证（用户/商家/管理员）
+  - name: user
+    description: C 端用户
+  - name: product
+    description: 商品浏览
+  - name: cart
+    description: 购物车
+  - name: order
+    description: 订单与支付
+  - name: merchant
+    description: 商家后台
+  - name: admin
+    description: 平台管理
+
+paths:
+  # ========== Auth ==========
+  /auth/user/register:
+    post:
+      tags: [auth]
+      summary: 用户注册
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegisterRequest'
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /auth/user/login:
+    post:
+      tags: [auth]
+      summary: 用户登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLoginRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /auth/merchant/login:
+    post:
+      tags: [auth]
+      summary: 商家登录
+      responses:
+        '200':
+          description: OK
+
+  /auth/admin/login:
+    post:
+      tags: [auth]
+      summary: 管理员登录
+      responses:
+        '200':
+          description: OK
+
+  # ========== Product (C端) ==========
+  /products:
+    get:
+      tags: [product]
+      summary: 商品列表（SPU）
+      parameters:
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+
+  /products/{spuId}:
+    get:
+      tags: [product]
+      summary: 商品详情（含 SKU 列表）
+      parameters:
+        - name: spuId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+
+  # ========== Cart ==========
+  /cart/items:
+    get:
+      tags: [cart]
+      summary: 获取购物车
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CartItem'
+    post:
+      tags: [cart]
+      summary: 加入购物车
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skuId, quantity]
+              properties:
+                skuId:
+                  type: integer
+                quantity:
+                  type: integer
+                  minimum: 1
+      responses:
+        '201':
+          description: Created
+
+  /cart/items/{itemId}:
+    put:
+      tags: [cart]
+      summary: 更新数量
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity:
+                  type: integer
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [cart]
+      summary: 删除购物车项
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: No Content
+
+  # ========== Order ==========
+  /orders:
+    post:
+      tags: [order]
+      summary: 创建订单（从购物车或直接购买）
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: 订单创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+    get:
+      tags: [order]
+      summary: 用户订单列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+      responses:
+        '200':
+          description: OK
+
+  /orders/{orderId}:
+    get:
+      tags: [order]
+      summary: 订单详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+
+  /orders/{orderId}/pay:
+    post:
+      tags: [order]
+      summary: Mock 支付
+      description: 模拟支付成功，订单状态 PENDING_PAYMENT → PAID → PENDING_SHIPMENT
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 支付成功
+
+  /orders/{orderId}/cancel:
+    post:
+      tags: [order]
+      summary: 取消订单（仅待支付）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+
+  # ========== Merchant ==========
+  /merchant/products:
+    get:
+      tags: [merchant]
+      summary: 商家商品列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [merchant]
+      summary: 创建商品（SPU+SKU）
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Created
+
+  /merchant/products/{spuId}/submit-audit:
+    post:
+      tags: [merchant]
+      summary: 提交商品审核
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spuId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+
+  /merchant/orders:
+    get:
+      tags: [merchant]
+      summary: 商家订单列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+      responses:
+        '200':
+          description: OK
+
+  /merchant/orders/{subOrderId}/ship:
+    post:
+      tags: [merchant]
+      summary: 发货
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: subOrderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [logisticsCompany, trackingNo]
+              properties:
+                logisticsCompany:
+                  type: string
+                trackingNo:
+                  type: string
+      responses:
+        '200':
+          description: OK
+
+  # ========== Admin ==========
+  /admin/products/pending:
+    get:
+      tags: [admin]
+      summary: 待审核商品列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+
+  /admin/products/{spuId}/audit:
+    post:
+      tags: [admin]
+      summary: 审核商品
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spuId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved:
+                  type: boolean
+                reason:
+                  type: string
+                  description: 驳回原因
+      responses:
+        '200':
+          description: OK
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    UserRegisterRequest:
+      type: object
+      required: [phone, password]
+      properties:
+        phone:
+          type: string
+        password:
+          type: string
+          format: password
+
+    UserLoginRequest:
+      type: object
+      required: [phone, password]
+      properties:
+        phone:
+          type: string
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        userId:
+          type: integer
+
+    ProductListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductSummary'
+
+    ProductSummary:
+      type: object
+      properties:
+        spuId:
+          type: integer
+        title:
+          type: string
+        mainImage:
+          type: string
+        minPrice:
+          type: number
+          format: double
+
+    ProductDetail:
+      type: object
+      properties:
+        spuId:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        skus:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sku'
+
+    Sku:
+      type: object
+      properties:
+        skuId:
+          type: integer
+        specJson:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            color: 黑色
+            storage: 256G
+        price:
+          type: number
+        stock:
+          type: integer
+
+    CartItem:
+      type: object
+      properties:
+        itemId:
+          type: integer
+        skuId:
+          type: integer
+        quantity:
+          type: integer
+        sku:
+          $ref: '#/components/schemas/Sku'
+
+    CreateOrderRequest:
+      type: object
+      required: [addressId, items]
+      properties:
+        addressId:
+          type: integer
+        items:
+          type: array
+          items:
+            type: object
+            required: [skuId, quantity]
+            properties:
+              skuId:
+                type: integer
+              quantity:
+                type: integer
+        remark:
+          type: string
+
+    OrderStatus:
+      type: string
+      enum:
+        - PENDING_PAYMENT
+        - PAID
+        - PENDING_SHIPMENT
+        - SHIPPED
+        - COMPLETED
+        - CANCELLED
+        - REFUNDING
+        - REFUNDED
+
+    Order:
+      type: object
+      properties:
+        orderId:
+          type: integer
+        orderNo:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        totalAmount:
+          type: number
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              skuId:
+                type: integer
+              title:
+                type: string
+              price:
+                type: number
+              quantity:
+                type: integer
+        createdAt:
+          type: string
+          format: date-time

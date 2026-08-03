@@ -1,0 +1,49 @@
+---
+description: 电商平台小组项目 AI 协作规则 — 全员共用
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# 电商项目上下文
+
+本项目为类京东 B2C 电商平台，3 人 3 周课程作业。重点在业务逻辑正确，而非功能堆砌。
+
+## 业务模型（必须遵守）
+
+- **商品**：SPU（标准产品）+ SKU（库存单元）。库存挂在 SKU 上。
+- **订单状态**：PENDING_PAYMENT → PAID → PENDING_SHIPMENT → SHIPPED → COMPLETED；可 CANCELLED / REFUNDING / REFUNDED。
+- **角色**：User（C 端）、Merchant（商家）、Admin（平台）。接口必须鉴权，禁止越权。
+- **支付**：Mock 即可，不调真实支付网关。
+
+## 文档优先级
+
+实现任何功能前，先阅读并对齐：
+1. `docs/domain/DOMAIN_MODEL.md`
+2. `docs/BUSINESS_GLOSSARY.md`
+3. `docs/api/openapi.yaml`
+
+未在领域模型中定义的状态、表、接口，**先改文档再写代码**。
+
+## 代码约定
+
+- 目录：`packages/web-user`（C 端）、`packages/web-merchant`（商家）、`packages/web-admin`（平台）
+- API 路径与字段以 `openapi.yaml` 为准
+- 订单项必须保存商品快照（title、price），避免后续改价影响历史订单
+- 库存操作需考虑并发：至少保证不出现负库存
+
+## UI
+
+- C 端参考 `docs/ui/UI_GUIDE.md` 主色与布局
+- B 端：侧边栏 + 顶栏 + 表格列表，操作清晰
+
+## 禁止
+
+- 不要臆造新的订单/商品/售后状态
+- 不要一次生成整个未拆分的大单体
+- 不要引入与组内未确认的技术栈
+- 不要提交 `.env`、密钥、真实用户数据
+
+## 输出要求
+
+生成业务代码时，简要说明对应哪条状态机转换或哪个领域规则。
