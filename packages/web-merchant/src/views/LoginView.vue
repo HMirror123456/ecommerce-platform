@@ -9,12 +9,17 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
+const formRef = ref(null);
 const form = ref({ username: '', password: '' });
 const loading = ref(false);
+const rules = {
+  username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+};
 
 async function onSubmit() {
-  if (!form.value.username || !form.value.password) {
-    ElMessage.warning('请输入账号和密码');
+  const valid = await formRef.value?.validate().catch(() => false);
+  if (!valid) {
     return;
   }
   loading.value = true;
@@ -36,11 +41,11 @@ async function onSubmit() {
     <div class="login-card">
       <h1>商家后台</h1>
       <p class="subtitle">商家账号登录</p>
-      <el-form label-position="top" @submit.prevent="onSubmit">
-        <el-form-item label="账号">
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="onSubmit">
+        <el-form-item label="账号" prop="username">
           <el-input v-model="form.username" autocomplete="username" />
         </el-form-item>
-        <el-form-item label="密码">
+        <el-form-item label="密码" prop="password">
           <el-input v-model="form.password" type="password" show-password autocomplete="current-password" @keyup.enter="onSubmit" />
         </el-form-item>
         <el-button type="primary" class="submit" :loading="loading" @click="onSubmit">登录</el-button>

@@ -26,6 +26,10 @@ function logout() {
           <el-icon><HomeFilled /></el-icon>
           <span>工作台</span>
         </el-menu-item>
+        <el-menu-item index="/orders">
+          <el-icon><Tickets /></el-icon>
+          <span>订单管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

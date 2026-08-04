@@ -17,6 +17,12 @@ const router = createRouter({
           component: () => import('@/views/DashboardView.vue'),
           meta: { title: '工作台' },
         },
+        {
+          path: 'orders',
+          name: 'orders',
+          component: () => import('@/views/OrderListView.vue'),
+          meta: { title: '订单列表' },
+        },
       ],
     },
   ],
