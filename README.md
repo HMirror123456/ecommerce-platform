@@ -18,6 +18,7 @@ ecommerce-platform/
 │   ├── api/                # OpenAPI 接口契约
 │   └── ui/                 # UI 规范
 ├── packages/
+│   ├── api/                # 后端 API — 组长
 │   ├── web-user/           # 用户端 — 成员 A
 │   ├── web-merchant/       # 商家后台 — 成员 B
 │   ├── web-admin/          # 平台管理后台 — 组长
@@ -55,11 +56,11 @@ ecommerce-platform/
 
 **原则：** 改接口先改 `openapi.yaml`，改状态先改 `DOMAIN_MODEL.md`。
 
-## 技术栈（组内确认后更新）
+## 技术栈
 
-- 后端：<!-- 如 Spring Boot 3 + MyBatis-Plus -->
-- 前端：<!-- 如 Vue 3 + Element Plus -->
-- 数据库：<!-- 如 MySQL 8 -->
+- 后端：Node.js + Express（`packages/api`）
+- 管理后台：Vue 3 + Vite + Element Plus（`packages/web-admin`）
+- 数据库：<!-- W2 接入 MySQL，当前 API 为内存 Mock -->
 
 ## 文档索引
 

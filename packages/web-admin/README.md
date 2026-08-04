@@ -1,25 +1,35 @@
 # 平台管理后台
 
-组长负责。业务与 API 详见 [`docs/domain/ADMIN.md`](../../docs/domain/ADMIN.md)。
+组长负责。业务详见 [`docs/domain/ADMIN.md`](../../docs/domain/ADMIN.md)。
 
-## 页面路由
+## 技术栈
 
-| 路由 | 页面 | 优先级 |
-|------|------|--------|
-| `/login` | 管理员登录 | P0 |
-| `/audit/products` | 商品审核 | P0 |
-| `/dashboard` | 工作台待办 | P1 |
-| `/orders` | 全平台订单查询 | P1 |
-| `/after-sales` | 售后仲裁 | P1 |
-| `/audit/merchants` | 商家入驻审核 | P1 |
+- Vue 3 + Vite 2 + Element Plus + Pinia + Vue Router
 
-## 本地启动
+## 启动（需先启动 API）
 
 ```bash
-cd packages/web-admin
-npm install
-npm run dev
+# 终端 1
+cd packages/api && npm run dev
+
+# 终端 2
+cd packages/web-admin && npm install && npm run dev
 ```
+
+- 前端：http://localhost:5174
+- API 代理：`/api` → `http://localhost:8080`
+
+## 演示登录
+
+- 账号：`operator`
+- 密码：`operator123`
+
+## 页面
+
+| 路由 | 功能 |
+|------|------|
+| `/login` | 管理员登录 |
+| `/audit/products` | 商品审核（列表 / 详情 / 通过 / 驳回） |
 
 ## Cursor 开发
 
@@ -30,9 +40,8 @@ npm run dev
 @docs/ui/UI_GUIDE.md
 ```
 
-## W2 联调顺序
+## Node 版本
 
-1. B 商家提交商品审核 → 本端审核通过
-2. A 用户浏览/下单/支付 → 本端查订单
-3. B 商家发货 → A 用户看到已发货
-4. W3：A 申请售后 → B 审核 → 本端仲裁
+- **最低要求：Node 14.17+**（当前环境 v14.17.5 可运行）
+- **推荐：Node 18 LTS 或 20 LTS**（Vite 5+、热重载更稳定）
+- API 的 `npm run dev` 在 Node 14 下为普通启动；Node 18+ 可改用 `node --watch`

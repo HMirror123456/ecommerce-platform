@@ -1,0 +1,13 @@
+:root {
+  --sidebar-bg: #001529;
+  --content-bg: #f0f2f5;
+  --color-primary: #e4393c;
+}
+* { box-sizing: border-box; }
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  color: #333;
+}
