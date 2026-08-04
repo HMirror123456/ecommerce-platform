@@ -13,15 +13,17 @@ alwaysApply: true
 
 - **商品**：SPU（标准产品）+ SKU（库存单元）。库存挂在 SKU 上。
 - **订单状态**：PENDING_PAYMENT → PAID → PENDING_SHIPMENT → SHIPPED → COMPLETED；可 CANCELLED / REFUNDING / REFUNDED。
-- **角色**：User（C 端）、Merchant（商家）、Admin（平台）。接口必须鉴权，禁止越权。
+- **售后状态**：APPLIED → APPROVED/REJECTED/ESCALATED → REFUNDED（详见 DOMAIN_MODEL.md）
+- **角色**：User（C 端）、Merchant（商家）、Admin（OPERATOR/CS_AGENT）。接口必须鉴权，禁止越权。
 - **支付**：Mock 即可，不调真实支付网关。
 
 ## 文档优先级
 
 实现任何功能前，先阅读并对齐：
 1. `docs/domain/DOMAIN_MODEL.md`
-2. `docs/BUSINESS_GLOSSARY.md`
-3. `docs/api/openapi.yaml`
+2. `docs/domain/ADMIN.md`（Admin/订单/售后）
+3. `docs/BUSINESS_GLOSSARY.md`
+4. `docs/api/openapi.yaml`
 
 未在领域模型中定义的状态、表、接口，**先改文档再写代码**。
 

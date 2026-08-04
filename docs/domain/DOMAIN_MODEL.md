@@ -1,6 +1,7 @@
 # 领域模型（Domain Model）
 
-> 描述核心业务实体、关系与状态机。开发前与 `docs/BUSINESS_GLOSSARY.md` 一起阅读。
+> 描述核心业务实体、关系与状态机。开发前与 `docs/BUSINESS_GLOSSARY.md` 一起阅读。  
+> 管理后台详见 [`docs/domain/ADMIN.md`](ADMIN.md)。
 
 ## 1. 限界上下文（Bounded Contexts）
 
@@ -20,16 +21,14 @@
 └──────────────┘  └──────────────┘  └──────────────┘
 ```
 
-### 各上下文职责（填写）
-
 | 上下文 | 核心聚合根 | 负责成员 | 说明 |
 |--------|------------|----------|------|
-| 用户 | User, Cart | 成员 A | |
-| 商品 | SPU, SKU, Stock | 成员 B | |
-| 交易 | Order, Payment | 组长 | |
-| 商家 | Merchant, Shop | 成员 B | |
-| 平台 | Admin, Audit | 组长 | |
-| 物流售后 | Shipment, AfterSale | <!-- 待定 --> | |
+| 用户 | User, Cart, Address | 成员 A | 注册登录、购物车、收货地址 |
+| 商品 | SPU, SKU, Stock, Category | 成员 B | 商品发布、库存、类目 |
+| 交易 | Order, SubOrder, Payment | 组长 | 下单、拆单、mock 支付 |
+| 商家 | Merchant, Shop | 成员 B | 入驻、店铺、发货 |
+| 平台 | Admin, ProductAudit | 组长 | 商品/商家审核、仲裁 |
+| 物流售后 | Shipment, AfterSale | A 申请 / B 审核 / 组长仲裁 | 发货、退款退货 |
 
 ---
 
@@ -53,25 +52,52 @@ erDiagram
 
     ORDER ||--o{ AFTER_SALE : may_have
     SUB_ORDER ||--o{ SHIPMENT : has
+    ADMIN ||--o{ PRODUCT_AUDIT : performs
 ```
 
-### 实体说明（调研后补充）
+### 实体说明
 
 #### User（用户）
-- **属性**：<!-- id, username, phone, memberLevel, createdAt -->
-- **不变式**：<!-- 如：手机号唯一 -->
+- **属性**：`id`, `phone`, `passwordHash`, `nickname`, `createdAt`
+- **不变式**：手机号唯一
+
+#### Address（收货地址）
+- **属性**：`id`, `userId`, `receiverName`, `phone`, `province`, `city`, `district`, `detail`, `isDefault`
 
 #### SPU / SKU / Stock
-- **SPU**：<!-- 标题、类目、品牌、主图 -->
-- **SKU**：<!-- 规格属性 JSON、价格、所属 SPU -->
-- **Stock**：<!-- available, locked, sold -->
-- **不变式**：<!-- 如：库存不能为负 -->
+- **SPU**：`id`, `shopId`, `categoryId`, `title`, `description`, `mainImage`, `status`（见商品审核状态机）
+- **SKU**：`id`, `spuId`, `specJson`, `price`
+- **Stock**：`skuId`, `available`, `locked`（`sold` 可选统计字段）
+- **不变式**：`available >= 0`，`locked >= 0`；扣减/释放时原子更新
 
-#### Order（订单）
-- **属性**：<!-- orderNo, userId, totalAmount, status, createdAt -->
-- **不变式**：<!-- 如：金额 = 各 OrderItem 之和 -->
+#### Order（主订单）
+- **属性**：`id`, `orderNo`, `userId`, `addressSnapshot`（JSON）, `totalAmount`, `status`, `createdAt`
+- **不变式**：`totalAmount = sum(order_items.price * quantity)`；下单时写入商品快照
 
-<!-- 继续补充 Merchant, Payment, AfterSale 等 -->
+#### OrderItem（订单项）
+- **属性**：`id`, `orderId`, `subOrderId`, `skuId`, `title`, `specJson`, `price`, `quantity`
+- **不变式**：`title`/`price` 为下单快照，不随 SKU 改价变化
+
+#### SubOrder（子订单，按商家拆单）
+- **属性**：`id`, `orderId`, `merchantId`, `shopId`, `status`, `shipmentId`
+- **不变式**：同一主订单按 `merchantId` 拆分；商家只见自己的 sub_order
+
+#### Payment（支付）
+- **属性**：`id`, `orderId`, `amount`, `status`（`PENDING`/`SUCCESS`/`FAILED`）, `paidAt`
+- **规则**：Mock 支付，点击即 `SUCCESS`，触发订单 `PENDING_PAYMENT → PAID → PENDING_SHIPMENT`
+
+#### Shipment（物流）
+- **属性**：`id`, `subOrderId`, `logisticsCompany`, `trackingNo`, `shippedAt`
+
+#### AfterSale（售后）
+- **属性**：`id`, `orderId`, `subOrderId`, `userId`, `type`（`REFUND_ONLY`/`RETURN_REFUND`）, `reason`, `status`, `appliedAt`, `merchantDeadline`
+- **不变式**：仅 `SHIPPED`/`COMPLETED` 订单可申请（P1 简化为已发货）
+
+#### Admin（平台管理员）
+- **属性**：`id`, `username`, `passwordHash`, `role`（`OPERATOR`/`CS_AGENT`）, `createdAt`
+
+#### ProductAudit（商品审核记录）
+- **属性**：`id`, `spuId`, `adminId`, `approved`, `reason`, `auditedAt`
 
 ---
 
@@ -81,47 +107,51 @@ erDiagram
 stateDiagram-v2
     [*] --> PENDING_PAYMENT: 创建订单
     PENDING_PAYMENT --> PAID: 支付成功
-    PENDING_PAYMENT --> CANCELLED: 超时/用户取消
-    PAID --> PENDING_SHIPMENT: 待发货
+    PENDING_PAYMENT --> CANCELLED: 超时15min或用户取消
+    PAID --> PENDING_SHIPMENT: 进入待发货
     PENDING_SHIPMENT --> SHIPPED: 商家发货
-    SHIPPED --> COMPLETED: 确认收货/超时自动
-    PAID --> REFUNDING: 申请售后
+    SHIPPED --> COMPLETED: 确认收货或超时自动
     SHIPPED --> REFUNDING: 申请售后
+    COMPLETED --> REFUNDING: 申请售后
     REFUNDING --> REFUNDED: 退款完成
-    REFUNDING --> COMPLETED: 拒绝/关闭售后
+    REFUNDING --> SHIPPED: 售后拒绝关闭
+    REFUNDING --> COMPLETED: 售后拒绝关闭
     CANCELLED --> [*]
     COMPLETED --> [*]
     REFUNDED --> [*]
 ```
 
-### 状态枚举（代码对齐用）
-
 | 状态 | 英文 | 触发条件 | 允许操作 |
 |------|------|----------|----------|
 | 待支付 | PENDING_PAYMENT | 下单成功 | 支付、取消 |
-| 已支付 | PAID | 支付回调 | — |
+| 已支付 | PAID | mock 支付成功 | —（瞬时态，进入待发货） |
 | 待发货 | PENDING_SHIPMENT | 支付完成 | 商家发货 |
 | 已发货 | SHIPPED | 填写物流 | 确认收货、申请售后 |
-| 已完成 | COMPLETED | 确认收货 | 评价（可选） |
+| 已完成 | COMPLETED | 确认收货 | 申请售后（可选） |
 | 已取消 | CANCELLED | 未支付取消 | — |
 | 退款中 | REFUNDING | 售后受理 | — |
 | 已退款 | REFUNDED | 退款成功 | — |
 
-### 业务决策记录（必填，体现理解深度）
+### 业务决策（已接受）
 
 **Q1：库存何时扣减？**
-- [ ] 下单锁库存，超时释放
-- [ ] 支付成功后扣减
-- [ ] 其他：<!-- 说明 -->
+- [x] 下单锁库存（`available → locked`），15min 未支付超时释放
+- [x] 支付成功后扣减（`locked → 0`，等价于售出）
+- 取消/超时：`locked → available`
 
-**Q2：是否拆单？按什么维度？**
-- [ ] 按商家拆单
-- [ ] 按仓库拆单
-- [ ] 不拆单（简化）
-- 说明：<!-- -->
+**Q2：是否拆单？**
+- [x] 按商家拆 `SubOrder`（同一购物车多商家 → 一个主订单 + 多个子订单）
+- 说明：商家后台只见本店 sub_order；用户见主订单聚合展示
 
-**Q3：促销叠加顺序？**
-- 说明：<!-- 如：会员价 → 满减 → 优惠券 -->
+**Q3：促销？**
+- 不做优惠券/满减/秒杀；单价 = SKU.price
+
+**支付方案：**
+- Mock：前端调 `POST /orders/{id}/pay` 即成功，写 `payments` 表
+
+**售后超时：**
+- 商家 48h 未处理 → `AfterSale.status = ESCALATED`；用户亦可主动「申请平台介入」
+- `CS_AGENT` 仲裁，详见 [`ADMIN.md`](ADMIN.md) §3
 
 ---
 
@@ -135,8 +165,16 @@ stateDiagram-v2
     PENDING_AUDIT --> REJECTED: 审核驳回
     REJECTED --> DRAFT: 修改后重提
     ON_SHELF --> OFF_SHELF: 下架
-    OFF_SHELF --> ON_SHELF: 重新上架
+    OFF_SHELF --> ON_SHELF: 重新上架需再审或免审
 ```
+
+| 状态 | 英文 | C 端可见 |
+|------|------|----------|
+| 草稿 | DRAFT | 否 |
+| 待审核 | PENDING_AUDIT | 否 |
+| 已上架 | ON_SHELF | 是 |
+| 已驳回 | REJECTED | 否 |
+| 已下架 | OFF_SHELF | 否 |
 
 ---
 
@@ -145,30 +183,45 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> APPLIED: 用户申请
-    APPLIED --> APPROVED: 商家/平台同意
-    APPLIED --> REJECTED: 拒绝
-    APPROVED --> RETURNING: 用户寄回（退货场景）
+    APPLIED --> APPROVED: 商家同意
+    APPLIED --> REJECTED: 商家拒绝
+    APPLIED --> ESCALATED: 48h超时或用户申诉
+    ESCALATED --> APPROVED: 平台裁定同意
+    ESCALATED --> REJECTED: 平台裁定拒绝
+    APPROVED --> RETURNING: 退货退款_用户寄回
     RETURNING --> REFUNDED: 验收通过退款
     APPROVED --> REFUNDED: 仅退款直接完成
     REJECTED --> [*]
     REFUNDED --> [*]
 ```
 
+| 状态 | 英文 | 说明 |
+|------|------|------|
+| 已申请 | APPLIED | 等待商家处理，48h 倒计时 |
+| 已同意 | APPROVED | 进入退款或退货流程 |
+| 已拒绝 | REJECTED | 商家或平台拒绝 |
+| 已升级 | ESCALATED | 待平台客服仲裁 |
+| 退货中 | RETURNING | 用户已寄回 |
+| 已退款 | REFUNDED | 退款完成，订单 → REFUNDED，库存回滚 |
+
 ---
 
-## 6. 领域事件（可选，加分项）
+## 6. 领域事件
 
 | 事件 | 触发时机 | 下游影响 |
 |------|----------|----------|
 | OrderCreated | 订单创建 | 锁库存 |
-| OrderPaid | 支付成功 | 通知商家发货 |
-| OrderShipped | 已发货 | 通知用户、更新物流 |
-| OrderCompleted | 交易完成 | 结算、释放锁定资源 |
-| ProductApproved | 商品审核通过 | C 端可见 |
+| OrderPaid | 支付成功 | 子订单待发货，通知商家 |
+| OrderShipped | 已发货 | 用户可见物流 |
+| OrderCompleted | 确认收货 | 交易完成 |
+| OrderCancelled | 未支付取消 | 释放锁定库存 |
+| ProductApproved | 商品审核通过 | C 端列表可见 |
+| AfterSaleEscalated | 售后升级 | CS_AGENT 待办 |
+| AfterSaleRefunded | 退款完成 | 订单 REFUNDED，库存回滚 |
 
 ---
 
-## 7. 数据库表清单（草案）
+## 7. 数据库表清单
 
 | 表名 | 说明 | 负责人 |
 |------|------|--------|
@@ -177,16 +230,18 @@ stateDiagram-v2
 | cart_items | 购物车 | 成员 A |
 | merchants | 商家 | 成员 B |
 | shops | 店铺 | 成员 B |
+| categories | 类目 | 成员 B |
 | spus | 标准产品 | 成员 B |
 | skus | SKU | 成员 B |
 | stocks | 库存 | 成员 B |
 | orders | 主订单 | 组长 |
-| order_items | 订单项 | 组长 |
+| order_items | 订单项（含快照） | 组长 |
 | sub_orders | 子订单 | 组长 |
 | payments | 支付记录 | 组长 |
-| shipments | 物流 | <!-- --> |
-| after_sales | 售后 | <!-- --> |
+| shipments | 物流 | 成员 B |
+| after_sales | 售后 | 组长（API）/ A+B 协作 |
 | admins | 平台管理员 | 组长 |
-| product_audits | 商品审核 | 组长 |
+| product_audits | 商品审核记录 | 组长 |
+| merchant_audits | 商家审核记录 | 组长 |
 
-<!-- 开发时补充字段级 ER 图或 DDL -->
+**Migration 合并顺序：** users → merchants/shops/categories/spus/skus/stocks → orders → after_sales
