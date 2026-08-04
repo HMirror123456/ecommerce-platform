@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { fetchMerchantOrders } from '@/api/merchant';
+import { fetchMerchantOrders, shipMerchantOrder } from '@/api/merchant';
 
 const ORDER_STATUS_OPTIONS = [
   { label: '待支付', value: 'PENDING_PAYMENT' },
@@ -18,6 +18,15 @@ const loading = ref(false);
 const orders = ref([]);
 const total = ref(0);
 const status = ref('');
+const shipDialogVisible = ref(false);
+const shipFormRef = ref(null);
+const shipSubmitting = ref(false);
+const shipTarget = ref(null);
+const shipForm = ref({ logisticsCompany: '', trackingNo: '' });
+const shipRules = {
+  logisticsCompany: [{ required: true, message: '请输入物流公司', trigger: 'blur' }],
+  trackingNo: [{ required: true, message: '请输入运单号', trigger: 'blur' }],
+};
 
 const statusLabelMap = computed(() =>
   ORDER_STATUS_OPTIONS.reduce((map, item) => {
@@ -93,8 +102,41 @@ function onStatusChange() {
   loadOrders();
 }
 
-function showShipPlaceholder() {
-  ElMessage.info('发货功能后续实现');
+function resetShipForm() {
+  shipForm.value = { logisticsCompany: '', trackingNo: '' };
+  shipFormRef.value?.clearValidate();
+}
+
+function openShipDialog(row) {
+  shipTarget.value = row;
+  shipDialogVisible.value = true;
+  resetShipForm();
+}
+
+function closeShipDialog() {
+  shipDialogVisible.value = false;
+  shipTarget.value = null;
+  resetShipForm();
+}
+
+async function submitShipment() {
+  const valid = await shipFormRef.value?.validate().catch(() => false);
+  if (!valid || !shipTarget.value) return;
+
+  shipSubmitting.value = true;
+  try {
+    const data = await shipMerchantOrder(shipTarget.value.subOrderId, {
+      logisticsCompany: shipForm.value.logisticsCompany,
+      trackingNo: shipForm.value.trackingNo,
+    });
+    ElMessage.success(data?.message || '发货成功');
+    closeShipDialog();
+    await loadOrders();
+  } catch (e) {
+    ElMessage.error(e.message || '发货失败');
+  } finally {
+    shipSubmitting.value = false;
+  }
 }
 
 onMounted(loadOrders);
@@ -159,7 +201,7 @@ onMounted(loadOrders);
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="row.status === 'PENDING_SHIPMENT'" link type="primary" @click="showShipPlaceholder">发货</el-button>
+          <el-button v-if="row.status === 'PENDING_SHIPMENT'" link type="primary" @click="openShipDialog(row)">发货</el-button>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
@@ -167,6 +209,27 @@ onMounted(loadOrders);
 
     <div class="summary">共 {{ total }} 条订单</div>
   </el-card>
+
+  <el-dialog v-model="shipDialogVisible" title="订单发货" width="420px" @closed="closeShipDialog">
+    <el-descriptions :column="1" border class="ship-info">
+      <el-descriptions-item label="订单编号">{{ shipTarget?.orderNo || '-' }}</el-descriptions-item>
+      <el-descriptions-item label="子订单ID">{{ shipTarget?.subOrderId || '-' }}</el-descriptions-item>
+    </el-descriptions>
+
+    <el-form ref="shipFormRef" :model="shipForm" :rules="shipRules" label-position="top">
+      <el-form-item label="物流公司" prop="logisticsCompany">
+        <el-input v-model="shipForm.logisticsCompany" />
+      </el-form-item>
+      <el-form-item label="运单号" prop="trackingNo">
+        <el-input v-model="shipForm.trackingNo" />
+      </el-form-item>
+    </el-form>
+
+    <template #footer>
+      <el-button @click="closeShipDialog">取消</el-button>
+      <el-button type="primary" :loading="shipSubmitting" @click="submitShipment">确认发货</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -183,6 +246,7 @@ onMounted(loadOrders);
 .item-meta { flex: none; color: #666; }
 .address { line-height: 1.5; }
 .muted { color: #999; }
+.ship-info { margin-bottom: 16px; }
 .summary {
   margin-top: 16px;
   display: flex;

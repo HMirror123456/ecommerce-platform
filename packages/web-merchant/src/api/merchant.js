@@ -7,3 +7,7 @@ export function login(username, password) {
 export function fetchMerchantOrders(params) {
   return client.get('/merchant/orders', { params }).then((r) => r.data);
 }
+
+export function shipMerchantOrder(subOrderId, payload) {
+  return client.post(`/merchant/orders/${subOrderId}/ship`, payload).then((r) => r.data);
+}
