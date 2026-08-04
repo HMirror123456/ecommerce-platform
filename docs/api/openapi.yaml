@@ -4,7 +4,8 @@ info:
   description: |
     3 人小组项目共用接口契约。修改接口请先改本文档，再实现前后端。
     业务术语见 docs/BUSINESS_GLOSSARY.md，状态机见 docs/domain/DOMAIN_MODEL.md
-  version: 0.1.0
+    管理后台见 docs/domain/ADMIN.md
+  version: 0.2.0
 
 servers:
   - url: http://localhost:8080/api
@@ -76,9 +77,19 @@ paths:
     post:
       tags: [auth]
       summary: 管理员登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuthResponse'
 
   # ========== Product (C端) ==========
   /products:
@@ -289,6 +300,53 @@ paths:
         '200':
           description: OK
 
+  /orders/{orderId}/after-sales:
+    post:
+      tags: [order]
+      summary: 用户申请售后
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAfterSaleRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AfterSale'
+
+  /orders/{orderId}/after-sales/{afterSaleId}/escalate:
+    post:
+      tags: [order]
+      summary: 用户申请平台介入
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+
   # ========== Merchant ==========
   /merchant/products:
     get:
@@ -366,6 +424,49 @@ paths:
         '200':
           description: OK
 
+  /merchant/after-sales:
+    get:
+      tags: [merchant]
+      summary: 商家售后列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AfterSaleStatus'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AfterSale'
+
+  /merchant/after-sales/{afterSaleId}/audit:
+    post:
+      tags: [merchant]
+      summary: 商家审核售后
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AfterSaleAuditRequest'
+      responses:
+        '200':
+          description: OK
+
   # ========== Admin ==========
   /admin/products/pending:
     get:
@@ -373,9 +474,24 @@ paths:
       summary: 待审核商品列表
       security:
         - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingProductListResponse'
 
   /admin/products/{spuId}/audit:
     post:
@@ -394,14 +510,153 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [approved]
-              properties:
-                approved:
-                  type: boolean
-                reason:
-                  type: string
-                  description: 驳回原因
+              $ref: '#/components/schemas/AuditRequest'
+      responses:
+        '200':
+          description: OK
+
+  /admin/orders:
+    get:
+      tags: [admin]
+      summary: 全平台订单列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderNo
+          in: query
+          schema:
+            type: string
+        - name: userId
+          in: query
+          schema:
+            type: integer
+        - name: merchantId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+
+  /admin/orders/{orderId}:
+    get:
+      tags: [admin]
+      summary: 订单详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+
+  /admin/after-sales:
+    get:
+      tags: [admin]
+      summary: 待仲裁售后列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AfterSaleListResponse'
+
+  /admin/after-sales/{afterSaleId}/arbitrate:
+    post:
+      tags: [admin]
+      summary: 平台仲裁售后
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArbitrateRequest'
+      responses:
+        '200':
+          description: OK
+
+  /admin/merchants/pending:
+    get:
+      tags: [admin]
+      summary: 待审核商家列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingMerchant'
+
+  /admin/merchants/{merchantId}/audit:
+    post:
+      tags: [admin]
+      summary: 审核商家入驻
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: merchantId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditRequest'
       responses:
         '200':
           description: OK
@@ -440,6 +695,208 @@ components:
           type: string
         userId:
           type: integer
+
+    AdminLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    AdminAuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        adminId:
+          type: integer
+        role:
+          $ref: '#/components/schemas/AdminRole'
+
+    AdminRole:
+      type: string
+      enum:
+        - OPERATOR
+        - CS_AGENT
+
+    AuditRequest:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+        reason:
+          type: string
+
+    ArbitrateRequest:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+        reason:
+          type: string
+
+    AfterSaleType:
+      type: string
+      enum:
+        - REFUND_ONLY
+        - RETURN_REFUND
+
+    AfterSaleStatus:
+      type: string
+      enum:
+        - APPLIED
+        - APPROVED
+        - REJECTED
+        - ESCALATED
+        - RETURNING
+        - REFUNDED
+
+    CreateAfterSaleRequest:
+      type: object
+      required: [type, reason]
+      properties:
+        type:
+          $ref: '#/components/schemas/AfterSaleType'
+        reason:
+          type: string
+        subOrderId:
+          type: integer
+
+    AfterSaleAuditRequest:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+        reason:
+          type: string
+
+    AfterSale:
+      type: object
+      properties:
+        afterSaleId:
+          type: integer
+        orderId:
+          type: integer
+        subOrderId:
+          type: integer
+        type:
+          $ref: '#/components/schemas/AfterSaleType'
+        reason:
+          type: string
+        status:
+          $ref: '#/components/schemas/AfterSaleStatus'
+        appliedAt:
+          type: string
+          format: date-time
+        merchantDeadline:
+          type: string
+          format: date-time
+
+    AfterSaleListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/AfterSale'
+
+    PendingProductListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        list:
+          type: array
+          items:
+            type: object
+            properties:
+              spuId:
+                type: integer
+              title:
+                type: string
+              shopName:
+                type: string
+              merchantId:
+                type: integer
+              mainImage:
+                type: string
+              submittedAt:
+                type: string
+                format: date-time
+
+    PendingMerchant:
+      type: object
+      properties:
+        merchantId:
+          type: integer
+        shopName:
+          type: string
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+        appliedAt:
+          type: string
+          format: date-time
+
+    OrderListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+
+    OrderDetail:
+      allOf:
+        - $ref: '#/components/schemas/Order'
+        - type: object
+          properties:
+            subOrders:
+              type: array
+              items:
+                $ref: '#/components/schemas/SubOrder'
+            addressSnapshot:
+              type: object
+              properties:
+                receiverName:
+                  type: string
+                phone:
+                  type: string
+                fullAddress:
+                  type: string
+
+    SubOrder:
+      type: object
+      properties:
+        subOrderId:
+          type: integer
+        merchantId:
+          type: integer
+        shopName:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        shipment:
+          type: object
+          properties:
+            logisticsCompany:
+              type: string
+            trackingNo:
+              type: string
+            shippedAt:
+              type: string
+              format: date-time
 
     ProductListResponse:
       type: object
