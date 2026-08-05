@@ -1,8 +1,33 @@
 import { Router } from 'express';
-import { getSubOrdersByMerchant, shipSubOrder } from '../data/store.js';
+import {
+  createMerchantProduct,
+  getMerchantProducts,
+  getSubOrdersByMerchant,
+  shipSubOrder,
+  submitMerchantProductAudit,
+} from '../data/store.js';
 import { requireMerchant } from '../middleware/auth.js';
 
 const router = Router();
+
+router.get('/products', requireMerchant, (req, res) => {
+  res.json(getMerchantProducts(req.merchant));
+});
+
+router.post('/products', requireMerchant, (req, res) => {
+  const result = createMerchantProduct(req.merchant, req.body || {});
+  if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
+  return res.status(201).json(result.product);
+});
+
+router.post('/products/:spuId/submit-audit', requireMerchant, (req, res) => {
+  const spuId = Number(req.params.spuId);
+  const result = submitMerchantProductAudit(req.merchant, spuId);
+  if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+  if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+  if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+  return res.json(result);
+});
 
 router.get('/orders', requireMerchant, (req, res) => {
   const status = req.query.status || undefined;
