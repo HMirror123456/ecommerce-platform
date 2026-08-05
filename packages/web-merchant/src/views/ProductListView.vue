@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useRouter } from 'vue-router';
 import { fetchMerchantProducts, submitMerchantProductAudit } from '@/api/merchant';
 
 const PRODUCT_STATUS_OPTIONS = [
@@ -15,6 +16,7 @@ const loading = ref(false);
 const products = ref([]);
 const total = ref(0);
 const submittingSpuId = ref(null);
+const router = useRouter();
 
 const statusMap = PRODUCT_STATUS_OPTIONS.reduce((map, item) => {
   map[item.value] = item;
@@ -100,6 +102,7 @@ onMounted(loadProducts);
           <div class="title">商品管理</div>
           <div class="description">管理商家已创建的商品，并提交平台审核</div>
         </div>
+        <el-button type="primary" @click="router.push({ name: 'product-create' })">发布商品</el-button>
       </div>
     </template>
 
