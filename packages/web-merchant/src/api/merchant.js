@@ -11,3 +11,11 @@ export function fetchMerchantOrders(params) {
 export function shipMerchantOrder(subOrderId, payload) {
   return client.post(`/merchant/orders/${subOrderId}/ship`, payload).then((r) => r.data);
 }
+
+export function fetchMerchantProducts() {
+  return client.get('/merchant/products').then((r) => r.data);
+}
+
+export function submitMerchantProductAudit(spuId) {
+  return client.post(`/merchant/products/${spuId}/submit-audit`).then((r) => r.data);
+}

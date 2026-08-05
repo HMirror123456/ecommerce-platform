@@ -23,6 +23,12 @@ const router = createRouter({
           component: () => import('@/views/OrderListView.vue'),
           meta: { title: '订单列表' },
         },
+        {
+          path: 'products',
+          name: 'products',
+          component: () => import('@/views/ProductListView.vue'),
+          meta: { title: '商品管理' },
+        },
       ],
     },
   ],
