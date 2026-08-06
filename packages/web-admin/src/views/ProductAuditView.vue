@@ -151,10 +151,14 @@ onMounted(loadList);
         <el-image :src="detail.mainImage" fit="contain" class="detail-img" />
         <el-descriptions :column="1" border class="desc">
           <el-descriptions-item label="SPU ID">{{ detail.spuId }}</el-descriptions-item>
+          <el-descriptions-item label="类目ID">{{ detail.categoryId ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="标题">{{ detail.title }}</el-descriptions-item>
           <el-descriptions-item label="店铺">{{ detail.shopName }}</el-descriptions-item>
           <el-descriptions-item label="描述">{{ detail.description }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ detail.status }}</el-descriptions-item>
+          <el-descriptions-item v-if="detail.rejectReason" label="驳回原因">
+            <el-text type="danger">{{ detail.rejectReason }}</el-text>
+          </el-descriptions-item>
         </el-descriptions>
         <h4>SKU 列表</h4>
         <el-table :data="detail.skus" size="small" border>
@@ -165,7 +169,12 @@ onMounted(loadList);
           <el-table-column label="价格" width="100">
             <template #default="{ row }">¥{{ row.price }}</template>
           </el-table-column>
-          <el-table-column prop="stock" label="库存" width="80" />
+          <el-table-column label="可用库存" width="100">
+            <template #default="{ row }">{{ row.stock?.available ?? row.stock ?? '-' }}</template>
+          </el-table-column>
+          <el-table-column label="锁定库存" width="100">
+            <template #default="{ row }">{{ row.stock?.locked ?? '-' }}</template>
+          </el-table-column>
         </el-table>
       </template>
     </div>

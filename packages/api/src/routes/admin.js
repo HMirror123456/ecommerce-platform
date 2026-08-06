@@ -1,8 +1,15 @@
 import { Router } from 'express';
-import { auditProduct, getPendingProducts, getSpuById } from '../data/store.js';
+import {
+  auditProduct,
+  getAdminOrderById,
+  getAdminOrders,
+  getAdminProductDetail,
+  getPendingProducts,
+} from '../data/store.js';
 import { requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
+const adminRoles = ['OPERATOR', 'CS_AGENT'];
 
 router.get('/products/pending', requireAdmin(['OPERATOR']), (req, res) => {
   const page = Number(req.query.page) || 1;
@@ -11,9 +18,9 @@ router.get('/products/pending', requireAdmin(['OPERATOR']), (req, res) => {
 });
 
 router.get('/products/:spuId', requireAdmin(['OPERATOR']), (req, res) => {
-  const spu = getSpuById(Number(req.params.spuId));
-  if (!spu) return res.status(404).json({ message: '商品不存在' });
-  res.json(spu);
+  const product = getAdminProductDetail(Number(req.params.spuId));
+  if (!product) return res.status(404).json({ message: '商品不存在' });
+  res.json(product);
 });
 
 router.post('/products/:spuId/audit', requireAdmin(['OPERATOR']), (req, res) => {
@@ -25,6 +32,19 @@ router.post('/products/:spuId/audit', requireAdmin(['OPERATOR']), (req, res) => 
   if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
   if (result.error === 'REASON_REQUIRED') return res.status(400).json({ message: result.message });
   res.json({ spuId: result.spu.spuId, status: result.spu.status, message: approved ? '审核通过' : '已驳回' });
+});
+
+router.get('/orders', requireAdmin(adminRoles), (req, res) => {
+  const { orderNo, userId, merchantId, status } = req.query;
+  const page = Number(req.query.page) || 1;
+  const pageSize = Number(req.query.pageSize) || 20;
+  res.json(getAdminOrders({ orderNo, userId, merchantId, status, page, pageSize }));
+});
+
+router.get('/orders/:orderId', requireAdmin(adminRoles), (req, res) => {
+  const order = getAdminOrderById(Number(req.params.orderId));
+  if (!order) return res.status(404).json({ message: '订单不存在' });
+  res.json(order);
 });
 
 export default router;

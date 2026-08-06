@@ -15,3 +15,11 @@ export function fetchProductDetail(spuId) {
 export function auditProduct(spuId, approved, reason) {
   return client.post(`/admin/products/${spuId}/audit`, { approved, reason }).then((r) => r.data);
 }
+
+export function fetchOrders(params) {
+  return client.get('/admin/orders', { params }).then((r) => r.data);
+}
+
+export function fetchOrderDetail(orderId) {
+  return client.get(`/admin/orders/${orderId}`).then((r) => r.data);
+}

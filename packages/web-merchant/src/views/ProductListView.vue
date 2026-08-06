@@ -67,11 +67,27 @@ async function loadProducts() {
   }
 }
 
+function canSubmitAudit(status) {
+  return status === 'DRAFT' || status === 'REJECTED';
+}
+
+function getSubmitAuditLabel(status) {
+  return status === 'REJECTED' ? '重新提交审核' : '提交审核';
+}
+
 async function confirmSubmitAudit(row) {
   if (!row?.spuId || submittingSpuId.value) return;
+
+  const isResubmit = row.status === 'REJECTED';
+  const confirmMessage = isResubmit
+    ? `平台驳回原因：${row.rejectReason || '未填写'}\n\n确认修改后重新提交审核？`
+    : '确认将该商品提交平台审核？提交后将进入待审核状态。';
+  const confirmTitle = isResubmit ? '重新提交审核确认' : '提交审核确认';
+  const confirmButtonText = isResubmit ? '重新提交审核' : '提交审核';
+
   try {
-    await ElMessageBox.confirm('确认将该商品提交平台审核？提交后将进入待审核状态。', '提交审核确认', {
-      confirmButtonText: '提交审核',
+    await ElMessageBox.confirm(confirmMessage, confirmTitle, {
+      confirmButtonText,
       cancelButtonText: '取消',
       type: 'warning',
     });
@@ -120,6 +136,14 @@ onMounted(loadProducts);
           <el-tag :type="getStatusTagType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="驳回原因" min-width="160" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.status === 'REJECTED' && row.rejectReason" class="reject-reason">
+            {{ row.rejectReason }}
+          </span>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="SKU数量" width="100">
         <template #default="{ row }">{{ getSkus(row).length }}</template>
       </el-table-column>
@@ -134,16 +158,16 @@ onMounted(loadProducts);
       <el-table-column label="提交审核时间" width="180">
         <template #default="{ row }">{{ formatTime(row.submittedAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
           <el-button
-            v-if="row.status === 'DRAFT'"
+            v-if="canSubmitAudit(row.status)"
             link
             type="primary"
             :loading="submittingSpuId === row.spuId"
             @click="confirmSubmitAudit(row)"
           >
-            提交审核
+            {{ getSubmitAuditLabel(row.status) }}
           </el-button>
           <span v-else class="muted">-</span>
         </template>
@@ -178,6 +202,7 @@ onMounted(loadProducts);
   line-height: 1.4;
 }
 .muted { color: #999; }
+.reject-reason { color: #f56c6c; }
 .summary {
   margin-top: 16px;
   display: flex;

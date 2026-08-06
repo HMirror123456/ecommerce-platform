@@ -10,12 +10,18 @@ const router = createRouter({
       component: () => import('@/layouts/AdminLayout.vue'),
       meta: { requiresAuth: true },
       children: [
-        { path: '', redirect: '/audit/products' },
+        { path: '', redirect: () => (useAuthStore().isOperator ? '/audit/products' : '/orders') },
         {
           path: 'audit/products',
           name: 'product-audit',
           component: () => import('@/views/ProductAuditView.vue'),
           meta: { requiresOperator: true, title: '商品审核' },
+        },
+        {
+          path: 'orders',
+          name: 'order-list',
+          component: () => import('@/views/OrderListView.vue'),
+          meta: { title: '订单查询' },
         },
       ],
     },
@@ -32,7 +38,7 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } };
   }
   if (to.meta.requiresOperator && !auth.isOperator) {
-    return { name: 'login', query: { reason: 'forbidden' } };
+    return '/orders';
   }
   return true;
 });
