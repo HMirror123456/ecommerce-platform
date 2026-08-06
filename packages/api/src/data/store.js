@@ -78,6 +78,46 @@ export const spus = [
 export const productAudits = [];
 export const orders = [];
 export const payments = [];
+export const afterSales = [
+  {
+    afterSaleId: 1,
+    orderId: 1,
+    subOrderId: 1,
+    userId: 1,
+    merchantId: 1,
+    shopName: '数码旗舰店',
+    type: 'REFUND_ONLY',
+    reason: '商品与描述不符，申请仅退款',
+    status: 'ESCALATED',
+    appliedAt: '2026-08-05T08:00:00.000Z',
+    merchantDeadline: '2026-08-07T08:00:00.000Z',
+    escalatedAt: '2026-08-07T09:00:00.000Z',
+  },
+  {
+    afterSaleId: 2,
+    orderId: 2,
+    subOrderId: 2,
+    userId: 1,
+    merchantId: 2,
+    shopName: '家居生活馆',
+    type: 'RETURN_REFUND',
+    reason: '收到商品有损坏，申请退货退款',
+    status: 'ESCALATED',
+    appliedAt: '2026-08-05T10:00:00.000Z',
+    merchantDeadline: '2026-08-07T10:00:00.000Z',
+    escalatedAt: '2026-08-07T11:00:00.000Z',
+  },
+];
+export const merchantApplications = [
+  {
+    merchantId: 101,
+    shopName: '新锐数码店',
+    contactName: '李四',
+    contactPhone: '13900139000',
+    appliedAt: '2026-08-06T06:00:00.000Z',
+    status: 'PENDING',
+  },
+];
 
 let orderSeq = 0;
 let subOrderSeq = 0;
@@ -730,4 +770,49 @@ export function shipSubOrder(merchantId, subOrderId, { logisticsCompany, trackin
     return { subOrder: sub, orderId: order.orderId, orderStatus: order.status };
   }
   return { error: 'NOT_FOUND', message: '子订单不存在' };
+}
+
+function serializeAfterSale(item) {
+  return {
+    afterSaleId: item.afterSaleId,
+    orderId: item.orderId,
+    subOrderId: item.subOrderId,
+    type: item.type,
+    reason: item.reason,
+    status: item.status,
+    appliedAt: item.appliedAt,
+    merchantDeadline: item.merchantDeadline,
+  };
+}
+
+export function getDashboardSummary() {
+  expirePendingOrders();
+  return {
+    pendingProductCount: spus.filter((s) => s.status === 'PENDING_AUDIT').length,
+    escalatedAfterSaleCount: afterSales.filter((a) => a.status === 'ESCALATED').length,
+    pendingMerchantCount: merchantApplications.filter((m) => m.status === 'PENDING').length,
+  };
+}
+
+export function getEscalatedAfterSales(page = 1, pageSize = 20) {
+  expirePendingOrders();
+  const list = afterSales.filter((a) => a.status === 'ESCALATED');
+  const start = (page - 1) * pageSize;
+  return {
+    total: list.length,
+    list: list.slice(start, start + pageSize).map(serializeAfterSale),
+  };
+}
+
+export function getPendingMerchants() {
+  expirePendingOrders();
+  return merchantApplications
+    .filter((m) => m.status === 'PENDING')
+    .map(({ merchantId, shopName, contactName, contactPhone, appliedAt }) => ({
+      merchantId,
+      shopName,
+      contactName,
+      contactPhone,
+      appliedAt,
+    }));
 }

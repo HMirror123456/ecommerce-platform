@@ -14,9 +14,19 @@ const loading = ref(false);
 
 onMounted(() => {
   if (route.query.reason === 'forbidden') {
-    ElMessage.warning('当前账号无商品审核权限，请使用运营管理员登录');
+    ElMessage.warning('当前账号无此页面权限');
   }
 });
+
+function getDefaultPath(role, redirect) {
+  if (redirect && typeof redirect === 'string') {
+    if (role === 'CS_AGENT' && (redirect.startsWith('/audit/') || redirect === '/audit/products')) {
+      return '/dashboard';
+    }
+    return redirect;
+  }
+  return '/dashboard';
+}
 
 async function onSubmit() {
   if (!form.value.username || !form.value.password) {
@@ -27,13 +37,8 @@ async function onSubmit() {
   try {
     const data = await login(form.value.username, form.value.password);
     auth.setSession(data, form.value.username);
-    if (data.role !== 'OPERATOR') {
-      ElMessage.warning('该账号为客服角色，暂无商品审核权限');
-      auth.logout();
-      return;
-    }
     ElMessage.success('登录成功');
-    router.replace((route.query.redirect) || '/audit/products');
+    router.replace(getDefaultPath(data.role, route.query.redirect));
   } catch (e) {
     ElMessage.error(e.message || '登录失败');
   } finally {
@@ -46,7 +51,7 @@ async function onSubmit() {
   <div class="login-page">
     <div class="login-card">
       <h1>平台管理后台</h1>
-      <p class="subtitle">运营管理员登录 · 商品审核</p>
+      <p class="subtitle">平台管理员登录</p>
       <el-form label-position="top" @submit.prevent="onSubmit">
         <el-form-item label="账号">
           <el-input v-model="form.username" placeholder="operator" />
@@ -56,7 +61,7 @@ async function onSubmit() {
         </el-form-item>
         <el-button type="primary" class="submit" :loading="loading" @click="onSubmit">登录</el-button>
       </el-form>
-      <p class="hint">演示账号：operator / operator123</p>
+      <p class="hint">运营：operator / operator123 · 客服：csagent / cs123</p>
     </div>
   </div>
 </template>

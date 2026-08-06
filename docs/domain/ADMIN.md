@@ -8,8 +8,8 @@
 |------|--------|----------|------|------|
 | 管理员登录 | P0 | JWT 登录，区分 OPERATOR / CS_AGENT 角色 | 无 | ✅ |
 | 商品审核队列 | P0 | 查看待审 SPU、通过/驳回（须填原因） | B：商家提交 `PENDING_AUDIT` | ✅ |
-| 工作台待办数 | P1 | 展示待审商品数、待仲裁售后数 | 审核/售后 API 就绪 | ⬜ |
-| 全平台订单查询 | P1 | 按订单号/用户/商家/状态筛选 | 订单数据已有 | ⬜ |
+| 工作台待办数 | P1 | 展示待审商品数、待仲裁售后数 | 审核/售后 API 就绪 | ✅ |
+| 全平台订单查询 | P1 | 按订单号/用户/商家/状态筛选 | 订单数据已有 | ✅ |
 | 售后仲裁 | P1 | 处理 `ESCALATED` 工单，裁定同意/拒绝 | A 申请 + B 超时未审 | ⬜ |
 | 商家入驻审核 | P1 | 审核入驻申请（可简化表单） | B 提交入驻 | ⬜ |
 | 类目管理 | P2 | 维护类目树（时间不够可只读） | B 提供类目 API | ⬜ |
@@ -115,6 +115,7 @@ sequenceDiagram
 | Method | Path | 角色 | 说明 |
 |--------|------|------|------|
 | POST | `/auth/admin/login` | — | 管理员登录 |
+| GET | `/admin/dashboard/summary` | OPERATOR, CS_AGENT | 工作台待办统计 |
 | GET | `/admin/products/pending` | OPERATOR | 待审核商品列表 |
 | POST | `/admin/products/{spuId}/audit` | OPERATOR | 审核通过/驳回 |
 | GET | `/admin/orders` | OPERATOR, CS_AGENT | 全平台订单（筛选） |

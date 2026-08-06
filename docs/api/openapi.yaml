@@ -487,6 +487,20 @@ paths:
           description: OK
 
   # ========== Admin ==========
+  /admin/dashboard/summary:
+    get:
+      tags: [admin]
+      summary: 工作台待办统计
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDashboardSummary'
+
   /admin/products/pending:
     get:
       tags: [admin]
@@ -759,6 +773,19 @@ components:
         reason:
           type: string
 
+    AdminDashboardSummary:
+      type: object
+      properties:
+        pendingProductCount:
+          type: integer
+          description: 待审核商品数（PENDING_AUDIT）
+        escalatedAfterSaleCount:
+          type: integer
+          description: 待仲裁售后数（ESCALATED）
+        pendingMerchantCount:
+          type: integer
+          description: 待审核商家入驻数
+
     AfterSaleType:
       type: string
       enum:
@@ -960,6 +987,9 @@ components:
         submittedAt:
           type: string
           format: date-time
+        rejectReason:
+          type: string
+          description: 平台驳回原因；仅 status=REJECTED 时有值
         skus:
           type: array
           items:
