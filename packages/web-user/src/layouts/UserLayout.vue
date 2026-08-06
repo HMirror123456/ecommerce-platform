@@ -48,7 +48,7 @@ function onSearch() {
     </el-header>
 
     <el-main class="main">
-      <p v-if="pageTitle && route.name !== 'products'" class="page-breadcrumb">{{ pageTitle }}</p>
+      <p v-if="pageTitle && !['products', 'product-detail'].includes(route.name)" class="page-breadcrumb">{{ pageTitle }}</p>
       <router-view />
     </el-main>
 

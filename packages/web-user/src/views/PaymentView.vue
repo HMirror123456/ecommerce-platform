@@ -91,7 +91,7 @@ async function onCancel() {
   try {
     await cancelOrder(orderId.value);
     ElMessage.success('订单已取消');
-    router.push({ name: 'checkout', query: { spuId: 101, skuId: 1001, quantity: 1 } });
+    router.push({ name: 'products' });
   } catch (e) {
     ElMessage.error(e.message || '取消失败');
   } finally {
@@ -121,7 +121,7 @@ onUnmounted(() => {
         <template #extra>
           <p class="result-meta">订单号：{{ order.orderNo }}</p>
           <p class="result-meta">支付金额：{{ formatPrice(order.totalAmount) }}</p>
-          <el-button type="primary" @click="router.push({ name: 'checkout', query: { spuId: 101, skuId: 1001, quantity: 1 } })">
+          <el-button type="primary" @click="router.push({ name: 'products' })">
             继续购物
           </el-button>
         </template>

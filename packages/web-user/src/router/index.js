@@ -23,6 +23,12 @@ const router = createRouter({
           meta: { title: '商品列表' },
         },
         {
+          path: 'products/:spuId',
+          name: 'product-detail',
+          component: () => import('@/views/ProductDetailView.vue'),
+          meta: { title: '商品详情' },
+        },
+        {
           path: 'checkout',
           name: 'checkout',
           component: () => import('@/views/CheckoutView.vue'),

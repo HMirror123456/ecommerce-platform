@@ -1,7 +1,10 @@
 <script setup>
 import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { fetchProductList } from '@/api/product';
+
+const router = useRouter();
 
 const loading = ref(false);
 const products = ref([]);
@@ -35,6 +38,10 @@ function onPageChange(nextPage) {
   loadProducts();
 }
 
+function goDetail(spuId) {
+  router.push({ name: 'product-detail', params: { spuId } });
+}
+
 onMounted(loadProducts);
 </script>
 
@@ -66,6 +73,7 @@ onMounted(loadProducts);
         v-for="item in products"
         :key="item.spuId"
         class="product-card"
+        @click="goDetail(item.spuId)"
       >
         <div class="product-image-wrap">
           <img :src="item.mainImage" :alt="item.title" class="product-image" loading="lazy" />
@@ -140,11 +148,13 @@ onMounted(loadProducts);
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border-color);
-  transition: box-shadow 0.2s;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
 }
 
 .product-card:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
 }
 
 .skeleton-card {
