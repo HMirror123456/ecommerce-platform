@@ -83,6 +83,92 @@ let orderSeq = 0;
 let subOrderSeq = 0;
 let paymentSeq = 0;
 
+function getNextSpuId() {
+  return Math.max(0, ...spus.map((s) => Number(s.spuId) || 0)) + 1;
+}
+
+function getNextSkuId() {
+  const skuIds = spus.flatMap((spu) => spu.skus.map((sku) => Number(sku.skuId) || 0));
+  return Math.max(0, ...skuIds) + 1;
+}
+
+function ownsSpu(merchant, spu) {
+  if (!merchant || !spu) return false;
+  if (spu.merchantId != null) return spu.merchantId === merchant.id;
+  return spu.shopId === merchant.shopId;
+}
+
+function serializeMerchantProduct(spu) {
+  const product = {
+    spuId: spu.spuId,
+    shopId: spu.shopId,
+    shopName: spu.shopName,
+    merchantId: spu.merchantId,
+    categoryId: spu.categoryId,
+    title: spu.title,
+    description: spu.description,
+    mainImage: spu.mainImage,
+    status: spu.status,
+    skus: spu.skus.map((sku) => ({
+      skuId: sku.skuId,
+      specJson: sku.specJson,
+      price: sku.price,
+      stock: {
+        available: sku.stock?.available ?? 0,
+        locked: sku.stock?.locked ?? 0,
+      },
+    })),
+  };
+  if (spu.submittedAt) product.submittedAt = spu.submittedAt;
+  return product;
+}
+
+function isPlainObject(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateCreateMerchantProductInput(payload) {
+  if (payload?.categoryId == null || payload.categoryId === '') {
+    return { error: 'INVALID_INPUT', message: 'Category is required' };
+  }
+  const categoryId = Number(payload?.categoryId);
+  if (!Number.isInteger(categoryId)) {
+    return { error: 'INVALID_INPUT', message: 'Category is required' };
+  }
+  if (!payload?.title?.trim()) {
+    return { error: 'INVALID_INPUT', message: 'Product title is required' };
+  }
+  if (!payload?.description?.trim()) {
+    return { error: 'INVALID_INPUT', message: 'Product description is required' };
+  }
+  if (!payload?.mainImage?.trim()) {
+    return { error: 'INVALID_INPUT', message: 'Product main image is required' };
+  }
+  if (!Array.isArray(payload?.skus) || payload.skus.length === 0) {
+    return { error: 'INVALID_INPUT', message: 'At least one SKU is required' };
+  }
+  for (const sku of payload.skus) {
+    if (!isPlainObject(sku.specJson)) {
+      return { error: 'INVALID_INPUT', message: 'SKU spec is required' };
+    }
+    if (sku.price == null || sku.price === '') {
+      return { error: 'INVALID_INPUT', message: 'SKU price is invalid' };
+    }
+    const price = Number(sku.price);
+    if (!Number.isFinite(price) || price < 0) {
+      return { error: 'INVALID_INPUT', message: 'SKU price is invalid' };
+    }
+    if (sku.stock?.available == null || sku.stock.available === '') {
+      return { error: 'INVALID_INPUT', message: 'Stock available is invalid' };
+    }
+    const available = Number(sku.stock?.available);
+    if (!Number.isInteger(available) || available < 0) {
+      return { error: 'INVALID_INPUT', message: 'Stock available is invalid' };
+    }
+  }
+  return { ok: true };
+}
+
 function nextOrderNo() {
   orderSeq += 1;
   const ts = Date.now();
@@ -196,6 +282,63 @@ export function getPendingProducts(page = 1, pageSize = 20) {
 export function getSpuById(spuId) {
   expirePendingOrders();
   return spus.find((s) => s.spuId === spuId);
+}
+
+export function getMerchantProducts(merchant) {
+  expirePendingOrders();
+  const list = spus.filter((spu) => ownsSpu(merchant, spu)).map((spu) => serializeMerchantProduct(spu));
+  return { total: list.length, list };
+}
+
+export function createMerchantProduct(merchant, payload) {
+  expirePendingOrders();
+  const validation = validateCreateMerchantProductInput(payload);
+  if (validation.error) return validation;
+
+  const spuId = getNextSpuId();
+  let skuId = getNextSkuId();
+  const spu = {
+    spuId,
+    shopId: merchant.shopId,
+    shopName: merchant.shopName,
+    merchantId: merchant.id,
+    categoryId: Number(payload.categoryId),
+    title: payload.title.trim(),
+    description: payload.description.trim(),
+    mainImage: payload.mainImage.trim(),
+    status: 'DRAFT',
+    skus: payload.skus.map((sku) => ({
+      skuId: skuId++,
+      specJson: sku.specJson,
+      price: Number(sku.price),
+      stock: {
+        available: Number(sku.stock.available),
+        locked: 0,
+      },
+    })),
+  };
+
+  spus.push(spu);
+  return { product: serializeMerchantProduct(spu) };
+}
+
+export function submitMerchantProductAudit(merchant, spuId) {
+  expirePendingOrders();
+  const spu = getSpuById(spuId);
+  if (!spu) return { error: 'NOT_FOUND', message: 'Product not found' };
+  if (!ownsSpu(merchant, spu)) {
+    return { error: 'FORBIDDEN', message: 'No permission to operate this product' };
+  }
+  if (spu.status !== 'DRAFT') {
+    return { error: 'INVALID_STATE', message: 'Only draft products can be submitted' };
+  }
+  spu.status = 'PENDING_AUDIT';
+  spu.submittedAt = new Date().toISOString();
+  return {
+    spuId: spu.spuId,
+    status: spu.status,
+    message: 'Product submitted for audit',
+  };
 }
 
 export function auditProduct(spuId, adminId, approved, reason) {
