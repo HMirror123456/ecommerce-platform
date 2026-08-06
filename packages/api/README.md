@@ -56,8 +56,47 @@ npm run dev   # Node 14+ 可用；改代码后需手动重启
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/merchant/orders` | 本子订单列表，可选 query `status` |
-| POST | `/merchant/orders/:subOrderId/ship` | 发货。body: `{ logisticsCompany, trackingNo }`，子单 `PENDING_SHIPMENT` → `SHIPPED` |
+| GET | `/merchant/products` | 获取当前商家的商品列表，包含 SPU、SKU、Stock 信息 |
+| POST | `/merchant/products` | 创建商品草稿。body: `{ categoryId, title, description, mainImage, skus }`，初始状态 `DRAFT` |
+| POST | `/merchant/products/:spuId/submit-audit` | 提交商品审核，状态 `DRAFT` → `PENDING_AUDIT` |
+| GET | `/merchant/orders` | 获取当前商家的子订单列表，可选 query `status` |
+| POST | `/merchant/orders/:subOrderId/ship` | 商家发货。body: `{ logisticsCompany, trackingNo }`，子单 `PENDING_SHIPMENT` → `SHIPPED` |
+
+### 商家商品测试流程
+
+1. 调用 `POST /auth/merchant/login`，使用 `merchant1 / 123456` 获取 token。
+2. 后续商家接口 Header 携带：`Authorization: Bearer TOKEN`。
+3. 调用 `POST /merchant/products` 创建商品草稿，示例 body：
+
+```json
+{
+  "categoryId": 1,
+  "title": "测试商品",
+  "description": "测试商品描述",
+  "mainImage": "https://example.com/product.png",
+  "skus": [
+    {
+      "specJson": {
+        "color": "黑色"
+      },
+      "price": 299,
+      "stock": {
+        "available": 100
+      }
+    }
+  ]
+}
+```
+
+4. 调用 `GET /merchant/products` 查看商品，创建后状态为 `DRAFT`。
+5. 调用 `POST /merchant/products/:spuId/submit-audit` 提交审核，状态变为 `PENDING_AUDIT`。
+6. 商品审核由 Admin 端后续处理。
+
+### 商家订单测试流程
+
+1. 用户端先完成下单并调用 `POST /orders/:id/pay` 支付成功。
+2. 商家登录后调用 `GET /merchant/orders?status=PENDING_SHIPMENT` 查看待发货子订单。
+3. 调用 `POST /merchant/orders/:subOrderId/ship` 填写物流公司和运单号完成发货。
 
 ## Admin 接口
 
