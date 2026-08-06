@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   createMerchantProduct,
+  getMerchantDashboardSummary,
   getMerchantProducts,
   getSubOrdersByMerchant,
   shipSubOrder,
@@ -9,6 +10,10 @@ import {
 import { requireMerchant } from '../middleware/auth.js';
 
 const router = Router();
+
+router.get('/dashboard/summary', requireMerchant, (req, res) => {
+  res.json(getMerchantDashboardSummary(req.merchant));
+});
 
 router.get('/products', requireMerchant, (req, res) => {
   res.json(getMerchantProducts(req.merchant));

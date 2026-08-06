@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
 import { fetchMerchantProducts, submitMerchantProductAudit } from '@/api/merchant';
@@ -16,12 +16,32 @@ const loading = ref(false);
 const products = ref([]);
 const total = ref(0);
 const submittingSpuId = ref(null);
+const keyword = ref('');
+const statusFilter = ref('');
 const router = useRouter();
 
 const statusMap = PRODUCT_STATUS_OPTIONS.reduce((map, item) => {
   map[item.value] = item;
   return map;
 }, {});
+
+const filteredProducts = computed(() => {
+  const q = keyword.value.trim().toLowerCase();
+  return products.value.filter((item) => {
+    const matchStatus = !statusFilter.value || item.status === statusFilter.value;
+    if (!q) return matchStatus;
+
+    const searchable = [
+      item.spuId,
+      item.title,
+      item.categoryId,
+    ]
+      .filter((value) => value != null)
+      .map((value) => String(value).toLowerCase());
+
+    return matchStatus && searchable.some((value) => value.includes(q));
+  });
+});
 
 function formatTime(iso) {
   if (!iso) return '-';
@@ -34,6 +54,10 @@ function getStatusLabel(value) {
 
 function getStatusTagType(value) {
   return statusMap[value]?.type || 'info';
+}
+
+function getRejectReason(row) {
+  return row?.rejectReason || row?.auditReason || row?.reason || '';
 }
 
 function getSkus(row) {
@@ -67,6 +91,11 @@ async function loadProducts() {
   }
 }
 
+function resetFilters() {
+  keyword.value = '';
+  statusFilter.value = '';
+}
+
 function canSubmitAudit(status) {
   return status === 'DRAFT' || status === 'REJECTED';
 }
@@ -77,11 +106,16 @@ function getSubmitAuditLabel(status) {
 
 async function confirmSubmitAudit(row) {
   if (!row?.spuId || submittingSpuId.value) return;
+  if (!canSubmitAudit(row.status)) {
+    ElMessage.warning('当前商品状态不允许提交审核');
+    return;
+  }
 
   const isResubmit = row.status === 'REJECTED';
+  const reason = getRejectReason(row) || '未填写';
   const confirmMessage = isResubmit
-    ? `平台驳回原因：${row.rejectReason || '未填写'}\n\n确认修改后重新提交审核？`
-    : '确认将该商品提交平台审核？提交后将进入待审核状态。';
+    ? `平台驳回原因：${reason}\n\n确认修改后重新提交审核？`
+    : '确认将该商品提交平台审核？提交后会进入待审核状态。';
   const confirmTitle = isResubmit ? '重新提交审核确认' : '提交审核确认';
   const confirmButtonText = isResubmit ? '重新提交审核' : '提交审核';
 
@@ -122,9 +156,28 @@ onMounted(loadProducts);
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="products" stripe>
+    <div class="filter-bar">
+      <el-input
+        v-model="keyword"
+        clearable
+        class="keyword-input"
+        placeholder="搜索商品标题 / 商品ID / 分类ID"
+      />
+      <el-select v-model="statusFilter" clearable placeholder="全部状态" class="status-filter">
+        <el-option label="全部" value="" />
+        <el-option
+          v-for="item in PRODUCT_STATUS_OPTIONS"
+          :key="item.value"
+          :label="item.label"
+          :value="item.value"
+        />
+      </el-select>
+      <el-button @click="resetFilters">重置</el-button>
+    </div>
+
+    <el-table v-loading="loading" :data="filteredProducts" stripe>
       <template #empty>
-        <el-empty description="暂无商品" />
+        <el-empty description="暂无符合条件的商品" />
       </template>
       <el-table-column prop="spuId" label="商品ID" width="100" />
       <el-table-column prop="title" label="商品标题" min-width="220" show-overflow-tooltip />
@@ -136,10 +189,10 @@ onMounted(loadProducts);
           <el-tag :type="getStatusTagType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="驳回原因" min-width="160" show-overflow-tooltip>
+      <el-table-column label="驳回原因" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">
-          <span v-if="row.status === 'REJECTED' && row.rejectReason" class="reject-reason">
-            {{ row.rejectReason }}
+          <span v-if="row.status === 'REJECTED' && getRejectReason(row)" class="reject-reason">
+            {{ getRejectReason(row) }}
           </span>
           <span v-else class="muted">-</span>
         </template>
@@ -158,7 +211,7 @@ onMounted(loadProducts);
       <el-table-column label="提交审核时间" width="180">
         <template #default="{ row }">{{ formatTime(row.submittedAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button
             v-if="canSubmitAudit(row.status)"
@@ -174,7 +227,7 @@ onMounted(loadProducts);
       </el-table-column>
     </el-table>
 
-    <div class="summary">共 {{ total }} 个商品</div>
+    <div class="summary">共 {{ filteredProducts.length }} / {{ total }} 个商品</div>
   </el-card>
 </template>
 
@@ -194,6 +247,19 @@ onMounted(loadProducts);
   margin-top: 4px;
   color: #999;
   font-size: 13px;
+}
+.filter-bar {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.keyword-input {
+  width: 360px;
+}
+.status-filter {
+  width: 160px;
 }
 .stock {
   display: flex;

@@ -348,6 +348,20 @@ paths:
           description: OK
 
   # ========== Merchant ==========
+  /merchant/dashboard/summary:
+    get:
+      tags: [merchant]
+      summary: 商家工作台统计
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MerchantDashboardSummary'
+
   /merchant/products:
     get:
       tags: [merchant]
@@ -952,6 +966,32 @@ components:
         - ON_SHELF
         - REJECTED
         - OFF_SHELF
+
+    MerchantDashboardSummary:
+      type: object
+      properties:
+        merchantId:
+          type: integer
+        shopId:
+          type: integer
+        shopName:
+          type: string
+        productTotal:
+          type: integer
+        draftProductCount:
+          type: integer
+        pendingAuditProductCount:
+          type: integer
+        onShelfProductCount:
+          type: integer
+        rejectedProductCount:
+          type: integer
+        offShelfProductCount:
+          type: integer
+        pendingShipmentOrderCount:
+          type: integer
+        shippedOrderCount:
+          type: integer
 
     MerchantProductListResponse:
       type: object

@@ -383,6 +383,39 @@ export function getMerchantProducts(merchant) {
   return { total: list.length, list };
 }
 
+export function getMerchantDashboardSummary(merchant) {
+  expirePendingOrders();
+  const merchantProducts = spus.filter((spu) => ownsSpu(merchant, spu));
+  const productCountByStatus = merchantProducts.reduce((countMap, spu) => {
+    countMap[spu.status] = (countMap[spu.status] || 0) + 1;
+    return countMap;
+  }, {});
+
+  let pendingShipmentOrderCount = 0;
+  let shippedOrderCount = 0;
+  for (const order of orders) {
+    for (const sub of order.subOrders) {
+      if (sub.merchantId !== merchant.id) continue;
+      if (sub.status === 'PENDING_SHIPMENT') pendingShipmentOrderCount += 1;
+      if (sub.status === 'SHIPPED') shippedOrderCount += 1;
+    }
+  }
+
+  return {
+    merchantId: merchant.id,
+    shopId: merchant.shopId,
+    shopName: merchant.shopName,
+    productTotal: merchantProducts.length,
+    draftProductCount: productCountByStatus.DRAFT || 0,
+    pendingAuditProductCount: productCountByStatus.PENDING_AUDIT || 0,
+    onShelfProductCount: productCountByStatus.ON_SHELF || 0,
+    rejectedProductCount: productCountByStatus.REJECTED || 0,
+    offShelfProductCount: productCountByStatus.OFF_SHELF || 0,
+    pendingShipmentOrderCount,
+    shippedOrderCount,
+  };
+}
+
 export function createMerchantProduct(merchant, payload) {
   expirePendingOrders();
   const validation = validateCreateMerchantProductInput(payload);

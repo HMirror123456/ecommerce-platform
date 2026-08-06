@@ -17,7 +17,8 @@ const ORDER_STATUS_OPTIONS = [
 const loading = ref(false);
 const orders = ref([]);
 const total = ref(0);
-const status = ref('');
+const keyword = ref('');
+const statusFilter = ref('');
 const shipDialogVisible = ref(false);
 const shipFormRef = ref(null);
 const shipSubmitting = ref(false);
@@ -34,6 +35,25 @@ const statusLabelMap = computed(() =>
     return map;
   }, {}),
 );
+
+const filteredOrders = computed(() => {
+  const q = keyword.value.trim().toLowerCase();
+  return orders.value.filter((order) => {
+    const matchStatus = !statusFilter.value || order.status === statusFilter.value;
+    if (!q) return matchStatus;
+
+    const searchable = [
+      order.orderNo,
+      order.subOrderId,
+      ...getItems(order).map((item) => item.title),
+      ...getShippingSearchValues(order),
+    ]
+      .filter((value) => value != null && value !== '')
+      .map((value) => String(value).toLowerCase());
+
+    return matchStatus && searchable.some((value) => value.includes(q));
+  });
+});
 
 function formatTime(iso) {
   if (!iso) return '-';
@@ -78,6 +98,23 @@ function getAddress(row) {
   return row?.addressSnapshot || {};
 }
 
+function getShippingSearchValues(row) {
+  const address = getAddress(row);
+  const values = [
+    row?.receiverInfo,
+    row?.shippingInfo,
+    row?.address,
+    row?.receiver,
+    row?.deliveryInfo,
+  ];
+  if (address && typeof address === 'object') {
+    values.push(...Object.values(address));
+  } else if (address) {
+    values.push(address);
+  }
+  return values;
+}
+
 function getShipment(row) {
   return row?.shipment || null;
 }
@@ -85,8 +122,7 @@ function getShipment(row) {
 async function loadOrders() {
   loading.value = true;
   try {
-    const params = status.value ? { status: status.value } : undefined;
-    const data = await fetchMerchantOrders(params);
+    const data = await fetchMerchantOrders();
     orders.value = Array.isArray(data?.list) ? data.list : [];
     total.value = Number(data?.total) || 0;
   } catch (e) {
@@ -98,8 +134,9 @@ async function loadOrders() {
   }
 }
 
-function onStatusChange() {
-  loadOrders();
+function resetFilters() {
+  keyword.value = '';
+  statusFilter.value = '';
 }
 
 function resetShipForm() {
@@ -147,15 +184,31 @@ onMounted(loadOrders);
     <template #header>
       <div class="card-header">
         <span>商家订单列表</span>
-        <el-select v-model="status" clearable placeholder="全部状态" class="status-filter" @change="onStatusChange">
-          <el-option v-for="item in ORDER_STATUS_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="orders" stripe>
+    <div class="filter-bar">
+      <el-input
+        v-model="keyword"
+        clearable
+        class="keyword-input"
+        placeholder="搜索订单号 / 子订单号 / 商品名 / 收货信息"
+      />
+      <el-select v-model="statusFilter" clearable placeholder="全部状态" class="status-filter">
+        <el-option label="全部" value="" />
+        <el-option
+          v-for="item in ORDER_STATUS_OPTIONS"
+          :key="item.value"
+          :label="item.label"
+          :value="item.value"
+        />
+      </el-select>
+      <el-button @click="resetFilters">重置</el-button>
+    </div>
+
+    <el-table v-loading="loading" :data="filteredOrders" stripe>
       <template #empty>
-        <el-empty description="暂无订单" />
+        <el-empty description="暂无符合条件的订单" />
       </template>
       <el-table-column prop="orderNo" label="订单编号" min-width="180" show-overflow-tooltip />
       <el-table-column prop="subOrderId" label="子订单" width="100" />
@@ -169,7 +222,7 @@ onMounted(loadOrders);
           <div v-if="getItems(row).length" class="items">
             <div v-for="item in getItems(row)" :key="item.skuId" class="item-line">
               <span class="item-title">{{ item.title || '-' }}</span>
-              <span class="item-meta">{{ formatPrice(item.price) }} × {{ item.quantity || 0 }}</span>
+              <span class="item-meta">{{ formatPrice(item.price) }} x {{ item.quantity || 0 }}</span>
             </div>
           </div>
           <span v-else>-</span>
@@ -207,7 +260,7 @@ onMounted(loadOrders);
       </el-table-column>
     </el-table>
 
-    <div class="summary">共 {{ total }} 条订单</div>
+    <div class="summary">共 {{ filteredOrders.length }} / {{ total }} 条订单</div>
   </el-card>
 
   <el-dialog v-model="shipDialogVisible" title="订单发货" width="420px" @closed="closeShipDialog">
@@ -239,7 +292,19 @@ onMounted(loadOrders);
   justify-content: space-between;
   gap: 16px;
 }
-.status-filter { width: 180px; }
+.filter-bar {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.keyword-input {
+  width: 360px;
+}
+.status-filter {
+  width: 160px;
+}
 .items { display: flex; flex-direction: column; gap: 6px; }
 .item-line { display: flex; justify-content: space-between; gap: 12px; }
 .item-title { color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

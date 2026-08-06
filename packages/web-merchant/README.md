@@ -1,6 +1,6 @@
 # 商家后台
 
-成员 B 负责的商家后台前端工程，用于商家登录、商品管理、商品发布、订单查看和发货。
+成员 B 负责的商家端，用于商家登录、工作台统计、商品管理、商品发布、商品提交审核、订单查看和发货。
 
 ## 技术栈
 
@@ -11,19 +11,17 @@
 - Vue Router
 - Axios
 
-## 已实现功能
-
-- 商家登录
-- 工作台
-- 商品管理
-- 商品发布
-- 商品提交审核
-- 订单管理
-- 商家发货
-
 ## 启动方式
 
-需先启动后端 API。
+先启动后端 API：
+
+```bash
+cd packages/api
+npm install
+npm run dev
+```
+
+再启动商家端：
 
 ```bash
 cd packages/web-merchant
@@ -31,77 +29,48 @@ npm install
 npm run dev
 ```
 
-- 前端地址：`http://localhost:5173`
-- API 代理：`/api` -> `http://localhost:8080`
+- 地址：`http://localhost:5173`
+- 演示账号：`merchant1 / 123456`
 
-## 构建方式
+## 页面
 
-```bash
-cd packages/web-merchant
-npm run build
-```
-
-## 主要页面
-
-| 路由 | 说明 |
+| 路由 | 功能 |
 |------|------|
 | `/login` | 商家登录 |
-| `/dashboard` | 工作台 |
-| `/products` | 商品管理 |
+| `/dashboard` | 工作台统计和快捷入口 |
+| `/products` | 商品列表、搜索、状态筛选、提交审核 |
 | `/products/create` | 发布商品 |
-| `/orders` | 订单管理 |
+| `/orders` | 订单列表、搜索、状态筛选、发货 |
 
-## 当前接口
+## 主要功能
+
+- 商品管理：按商品标题、商品 ID、分类 ID 搜索，并按商品状态筛选。
+- 商品审核：`DRAFT` 和 `REJECTED` 可提交审核，`PENDING_AUDIT` / `ON_SHELF` 不显示提交审核按钮。
+- 订单管理：按订单号、子订单号、商品名、收货信息搜索，并按订单状态筛选。
+- 订单发货：待发货订单可填写物流公司和运单号完成发货。
+
+## 接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/auth/merchant/login` | 商家登录 |
-| GET | `/merchant/products` | 获取当前商家的商品列表 |
-| POST | `/merchant/products` | 创建商品草稿 |
-| POST | `/merchant/products/:spuId/submit-audit` | 提交商品审核 |
-| GET | `/merchant/orders` | 获取当前商家的订单列表 |
-| POST | `/merchant/orders/:subOrderId/ship` | 商家发货 |
+| GET | `/merchant/dashboard/summary` | 工作台统计 |
+| GET | `/merchant/products` | 商品列表 |
+| POST | `/merchant/products` | 创建商品 |
+| POST | `/merchant/products/:spuId/submit-audit` | 提交审核 |
+| GET | `/merchant/orders` | 订单列表 |
+| POST | `/merchant/orders/:subOrderId/ship` | 发货 |
 
-登录成功后会保存商家会话信息到 `localStorage`，key 为 `merchant_auth`。
+## 快速验收
 
-## 简单测试流程
+1. 使用 `merchant1 / 123456` 登录。
+2. 进入 `/dashboard`，查看统计卡片和快捷入口。
+3. 进入 `/products`，测试商品搜索、状态筛选和提交审核按钮显示规则。
+4. 进入 `/products/create`，创建商品后回到商品列表。
+5. 进入 `/orders`，测试订单搜索、状态筛选；待发货订单可点击发货。
 
-1. 启动后端 API 和商家端前端。
-2. 使用商家账号登录。
-3. 进入商品管理 `/products`。
-4. 点击发布商品，填写商品和 SKU 信息。
-5. 创建成功后返回商品列表，商品状态为 `DRAFT`。
-6. 点击提交审核，商品状态变为 `PENDING_AUDIT`。
-7. 用户下单并支付后，商家可在订单管理 `/orders` 查看待发货订单。
-8. 对待发货订单填写物流公司和运单号完成发货。
+## 说明
 
-## 注意事项
-
-- 订单管理为空是正常的，需要用户下单并支付后才会出现待发货订单。
-- 旧 mock 商品可能没有 `categoryId`，所以分类 ID 会显示为 `-`。
-- 当前未实现商品编辑、删除、上下架和图片上传。
-
-## 目录结构
-
-```text
-src/
-  api/
-    client.js
-    merchant.js
-  layouts/
-    MerchantLayout.vue
-  router/
-    index.js
-  stores/
-    auth.js
-  styles/
-    global.css
-  views/
-    DashboardView.vue
-    LoginView.vue
-    OrderListView.vue
-    ProductCreateView.vue
-    ProductListView.vue
-  App.vue
-  main.js
-```
+- 搜索和筛选均为前端本地筛选，不新增后端接口。
+- 订单为空是正常情况，需要用户下单并支付后才会出现待发货订单。
+- 当前不包含商品编辑、删除、上下架、图片上传和售后功能。
