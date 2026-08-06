@@ -20,6 +20,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => !!token.value);
   const isOperator = computed(() => role.value === 'OPERATOR');
+  const isCsAgent = computed(() => role.value === 'CS_AGENT');
 
   function persist() {
     localStorage.setItem(
@@ -44,5 +45,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(STORAGE_KEY);
   }
 
-  return { token, adminId, role, username, isLoggedIn, isOperator, setSession, logout };
+  return { token, adminId, role, username, isLoggedIn, isOperator, isCsAgent, setSession, logout };
 });

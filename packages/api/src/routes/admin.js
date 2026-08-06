@@ -4,12 +4,19 @@ import {
   getAdminOrderById,
   getAdminOrders,
   getAdminProductDetail,
+  getDashboardSummary,
+  getEscalatedAfterSales,
+  getPendingMerchants,
   getPendingProducts,
 } from '../data/store.js';
 import { requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 const adminRoles = ['OPERATOR', 'CS_AGENT'];
+
+router.get('/dashboard/summary', requireAdmin(adminRoles), (_req, res) => {
+  res.json(getDashboardSummary());
+});
 
 router.get('/products/pending', requireAdmin(['OPERATOR']), (req, res) => {
   const page = Number(req.query.page) || 1;
@@ -45,6 +52,16 @@ router.get('/orders/:orderId', requireAdmin(adminRoles), (req, res) => {
   const order = getAdminOrderById(Number(req.params.orderId));
   if (!order) return res.status(404).json({ message: '订单不存在' });
   res.json(order);
+});
+
+router.get('/after-sales', requireAdmin(['CS_AGENT']), (req, res) => {
+  const page = Number(req.query.page) || 1;
+  const pageSize = Number(req.query.pageSize) || 20;
+  res.json(getEscalatedAfterSales(page, pageSize));
+});
+
+router.get('/merchants/pending', requireAdmin(['OPERATOR']), (_req, res) => {
+  res.json(getPendingMerchants());
 });
 
 export default router;

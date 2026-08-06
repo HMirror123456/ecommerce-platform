@@ -23,3 +23,15 @@ export function fetchOrders(params) {
 export function fetchOrderDetail(orderId) {
   return client.get(`/admin/orders/${orderId}`).then((r) => r.data);
 }
+
+export function fetchDashboardSummary() {
+  return client.get('/admin/dashboard/summary').then((r) => r.data);
+}
+
+export function fetchEscalatedAfterSales(params) {
+  return client.get('/admin/after-sales', { params }).then((r) => r.data);
+}
+
+export function fetchPendingMerchants() {
+  return client.get('/admin/merchants/pending').then((r) => r.data);
+}
