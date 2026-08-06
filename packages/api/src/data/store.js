@@ -81,31 +81,81 @@ export const payments = [];
 export const afterSales = [
   {
     afterSaleId: 1,
-    orderId: 1,
-    subOrderId: 1,
+    orderId: 10001,
+    orderNo: 'ORD-DEMO-10001',
+    subOrderId: 50001,
     userId: 1,
     merchantId: 1,
     shopName: '数码旗舰店',
     type: 'REFUND_ONLY',
-    reason: '商品与描述不符，申请仅退款',
-    status: 'ESCALATED',
+    reason: '耳机降噪效果与描述不符，申请仅退款',
+    status: 'APPLIED',
     appliedAt: '2026-08-05T08:00:00.000Z',
     merchantDeadline: '2026-08-07T08:00:00.000Z',
-    escalatedAt: '2026-08-07T09:00:00.000Z',
+    items: [{ skuId: 1001, title: '无线蓝牙耳机 Pro', price: 299, quantity: 1 }],
   },
   {
     afterSaleId: 2,
-    orderId: 2,
-    subOrderId: 2,
+    orderId: 10002,
+    orderNo: 'ORD-DEMO-10002',
+    subOrderId: 50002,
     userId: 1,
-    merchantId: 2,
-    shopName: '家居生活馆',
+    merchantId: 1,
+    shopName: '数码旗舰店',
     type: 'RETURN_REFUND',
-    reason: '收到商品有损坏，申请退货退款',
+    reason: '商品外包装破损，申请退货退款',
+    status: 'APPROVED',
+    appliedAt: '2026-08-04T09:00:00.000Z',
+    merchantDeadline: '2026-08-06T09:00:00.000Z',
+    auditReason: '同意售后申请，请用户寄回商品',
+    auditedAt: '2026-08-04T10:00:00.000Z',
+    items: [{ skuId: 1004, title: '机械键盘 87 键', price: 449, quantity: 1 }],
+  },
+  {
+    afterSaleId: 5,
+    orderId: 10005,
+    orderNo: 'ORD-DEMO-10005',
+    subOrderId: 50005,
+    userId: 1,
+    merchantId: 1,
+    shopName: '数码旗舰店',
+    type: 'RETURN_REFUND',
+    reason: '键盘按键失灵，申请退货退款',
+    status: 'APPLIED',
+    appliedAt: '2026-08-05T09:30:00.000Z',
+    merchantDeadline: '2026-08-07T09:30:00.000Z',
+    items: [{ skuId: 1004, title: '机械键盘 87 键', price: 449, quantity: 1 }],
+  },
+  {
+    afterSaleId: 3,
+    orderId: 10003,
+    orderNo: 'ORD-DEMO-10003',
+    subOrderId: 50003,
+    userId: 1,
+    merchantId: 1,
+    shopName: '数码旗舰店',
+    type: 'REFUND_ONLY',
+    reason: '商家超时未处理，等待平台介入',
     status: 'ESCALATED',
     appliedAt: '2026-08-05T10:00:00.000Z',
     merchantDeadline: '2026-08-07T10:00:00.000Z',
     escalatedAt: '2026-08-07T11:00:00.000Z',
+    items: [{ skuId: 1001, title: '无线蓝牙耳机 Pro', price: 299, quantity: 1 }],
+  },
+  {
+    afterSaleId: 4,
+    orderId: 10004,
+    orderNo: 'ORD-DEMO-10004',
+    subOrderId: 50004,
+    userId: 1,
+    merchantId: 2,
+    shopName: '家居生活馆',
+    type: 'RETURN_REFUND',
+    reason: '台灯灯罩破损，申请退货退款',
+    status: 'APPLIED',
+    appliedAt: '2026-08-05T11:00:00.000Z',
+    merchantDeadline: '2026-08-07T11:00:00.000Z',
+    items: [{ skuId: 1003, title: '北欧简约台灯', price: 159, quantity: 1 }],
   },
 ];
 export const merchantApplications = [
@@ -810,12 +860,54 @@ function serializeAfterSale(item) {
     afterSaleId: item.afterSaleId,
     orderId: item.orderId,
     subOrderId: item.subOrderId,
+    merchantId: item.merchantId,
+    userId: item.userId,
     type: item.type,
     reason: item.reason,
     status: item.status,
     appliedAt: item.appliedAt,
     merchantDeadline: item.merchantDeadline,
+    auditReason: item.auditReason || null,
+    orderNo: item.orderNo,
+    shopName: item.shopName,
+    items: Array.isArray(item.items) ? item.items : [],
   };
+}
+
+export function getMerchantAfterSales(merchantId, status) {
+  expirePendingOrders();
+  let list = afterSales.filter((item) => item.merchantId === merchantId);
+  if (status) list = list.filter((item) => item.status === status);
+  list = [...list].sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt));
+  return {
+    total: list.length,
+    list: list.map(serializeAfterSale),
+  };
+}
+
+export function auditMerchantAfterSale(merchantId, afterSaleId, { approved, reason } = {}) {
+  expirePendingOrders();
+  if (typeof approved !== 'boolean') {
+    return { error: 'INVALID_INPUT', message: 'approved 必须是布尔值' };
+  }
+  if (!approved && !reason?.trim()) {
+    return { error: 'REASON_REQUIRED', message: '拒绝售后必须填写原因' };
+  }
+
+  const item = afterSales.find((afterSale) => afterSale.afterSaleId === afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+  if (item.merchantId !== merchantId) return { error: 'FORBIDDEN', message: '无权处理该售后单' };
+  if (item.status !== 'APPLIED') {
+    if (item.status === 'ESCALATED') {
+      return { error: 'INVALID_STATE', message: '该售后单已进入平台仲裁，商家不能处理' };
+    }
+    return { error: 'INVALID_STATE', message: '该售后单当前状态不允许处理' };
+  }
+
+  item.status = approved ? 'APPROVED' : 'REJECTED';
+  item.auditReason = reason?.trim() || null;
+  item.auditedAt = new Date().toISOString();
+  return { afterSale: serializeAfterSale(item) };
 }
 
 export function getDashboardSummary() {

@@ -27,3 +27,11 @@ export function createMerchantProduct(payload) {
 export function submitMerchantProductAudit(spuId) {
   return client.post(`/merchant/products/${spuId}/submit-audit`).then((r) => r.data);
 }
+
+export function getAfterSales(params) {
+  return client.get('/merchant/after-sales', { params }).then((r) => r.data);
+}
+
+export function auditAfterSale(afterSaleId, data) {
+  return client.post(`/merchant/after-sales/${afterSaleId}/audit`, data).then((r) => r.data);
+}

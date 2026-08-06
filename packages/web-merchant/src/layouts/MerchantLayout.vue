@@ -34,6 +34,10 @@ function logout() {
           <el-icon><Tickets /></el-icon>
           <span>订单管理</span>
         </el-menu-item>
+        <el-menu-item index="/after-sales">
+          <el-icon><Service /></el-icon>
+          <span>售后处理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
