@@ -1,0 +1,17 @@
+import client from './client';
+
+export function createOrder(payload) {
+  return client.post('/orders', payload).then((r) => r.data);
+}
+
+export function fetchOrder(orderId) {
+  return client.get(`/orders/${orderId}`).then((r) => r.data);
+}
+
+export function payOrder(orderId) {
+  return client.post(`/orders/${orderId}/pay`).then((r) => r.data);
+}
+
+export function cancelOrder(orderId) {
+  return client.post(`/orders/${orderId}/cancel`).then((r) => r.data);
+}
