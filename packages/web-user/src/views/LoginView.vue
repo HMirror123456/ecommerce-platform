@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus';
 import { login } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
 
-const DEFAULT_REDIRECT = '/checkout?spuId=101&skuId=1001&quantity=1';
+const DEFAULT_REDIRECT = '/products';
 
 const route = useRoute();
 const router = useRouter();

@@ -15,7 +15,13 @@ const router = createRouter({
       component: () => import('@/layouts/UserLayout.vue'),
       meta: { requiresAuth: true },
       children: [
-        { path: '', redirect: '/checkout?spuId=101&skuId=1001&quantity=1' },
+        { path: '', redirect: '/products' },
+        {
+          path: 'products',
+          name: 'products',
+          component: () => import('@/views/ProductListView.vue'),
+          meta: { title: '商品列表' },
+        },
         {
           path: 'checkout',
           name: 'checkout',
@@ -37,7 +43,7 @@ router.beforeEach((to) => {
   const auth = useAuthStore();
   if (to.meta.public) {
     if (auth.isLoggedIn && to.name === 'login') {
-      return to.query.redirect || '/checkout?spuId=101&skuId=1001&quantity=1';
+      return to.query.redirect || '/products';
     }
     return true;
   }

@@ -9,6 +9,7 @@
 ## 已实现功能
 
 - 用户登录（手机号 + 密码）
+- 商品列表（分页、骨架屏加载）
 - 立即购买结算页（通过 URL query 传入商品）
 - Mock 支付页（15 分钟倒计时、支付/取消）
 
@@ -33,11 +34,11 @@ npm run dev
 
 ## 演示流程
 
-1. 访问结算页（未登录会跳转登录）：
-   `http://localhost:5175/checkout?spuId=101&skuId=1001&quantity=1`
+1. 访问商品列表：`http://localhost:5175/products`（未登录会跳转登录）
 2. 使用演示账号登录：`13800138000` / `123456`
-3. 确认商品与地址，点击「提交订单」
-4. 在支付页点击「立即支付」完成 Mock 支付
+3. 浏览商品列表（后续可接入商品详情页）
+4. 访问结算页测试下单：`http://localhost:5175/checkout?spuId=101&skuId=1001&quantity=1`
+5. 在支付页点击「立即支付」完成 Mock 支付
 5. 商家端验证：登录 `merchant1/123456`，在订单列表查看 `PENDING_SHIPMENT` 订单
 
 ## 主要页面
@@ -45,6 +46,7 @@ npm run dev
 | 路由 | 说明 |
 |------|------|
 | `/login` | 用户登录 |
+| `/products` | 商品列表 |
 | `/checkout?spuId=&skuId=&quantity=` | 确认订单（立即购买） |
 | `/orders/:orderId/pay` | 订单支付 |
 
@@ -63,7 +65,7 @@ src/
   router/       index.js
   stores/       auth.js
   styles/       global.css
-  views/        LoginView.vue, CheckoutView.vue, PaymentView.vue
+  views/        LoginView.vue, ProductListView.vue, CheckoutView.vue, PaymentView.vue
 ```
 
 ## Cursor 开发
