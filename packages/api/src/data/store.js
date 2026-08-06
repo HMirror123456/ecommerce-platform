@@ -120,7 +120,34 @@ function serializeMerchantProduct(spu) {
     })),
   };
   if (spu.submittedAt) product.submittedAt = spu.submittedAt;
+  if (spu.rejectReason) product.rejectReason = spu.rejectReason;
   return product;
+}
+
+function serializePublicProductSummary(spu) {
+  const prices = spu.skus.map((s) => s.price);
+  return {
+    spuId: spu.spuId,
+    title: spu.title,
+    mainImage: spu.mainImage,
+    minPrice: prices.length ? Math.min(...prices) : 0,
+  };
+}
+
+function serializePublicProductDetail(spu) {
+  return {
+    spuId: spu.spuId,
+    title: spu.title,
+    description: spu.description,
+    mainImage: spu.mainImage,
+    shopName: spu.shopName,
+    skus: spu.skus.map((sku) => ({
+      skuId: sku.skuId,
+      specJson: sku.specJson,
+      price: sku.price,
+      stock: sku.stock?.available ?? 0,
+    })),
+  };
 }
 
 function isPlainObject(value) {
@@ -284,6 +311,32 @@ export function getSpuById(spuId) {
   return spus.find((s) => s.spuId === spuId);
 }
 
+export function getAdminProductDetail(spuId) {
+  const spu = getSpuById(spuId);
+  if (!spu) return null;
+  return serializeMerchantProduct(spu);
+}
+
+export function getPublicProducts(page = 1, pageSize = 20, categoryId) {
+  expirePendingOrders();
+  let list = spus.filter((s) => s.status === 'ON_SHELF');
+  if (categoryId != null && categoryId !== '') {
+    const cid = Number(categoryId);
+    if (Number.isInteger(cid)) list = list.filter((s) => s.categoryId === cid);
+  }
+  const start = (page - 1) * pageSize;
+  return {
+    total: list.length,
+    list: list.slice(start, start + pageSize).map(serializePublicProductSummary),
+  };
+}
+
+export function getPublicProductDetail(spuId) {
+  const spu = getSpuById(spuId);
+  if (!spu || spu.status !== 'ON_SHELF') return null;
+  return serializePublicProductDetail(spu);
+}
+
 export function getMerchantProducts(merchant) {
   expirePendingOrders();
   const list = spus.filter((spu) => ownsSpu(merchant, spu)).map((spu) => serializeMerchantProduct(spu));
@@ -329,11 +382,12 @@ export function submitMerchantProductAudit(merchant, spuId) {
   if (!ownsSpu(merchant, spu)) {
     return { error: 'FORBIDDEN', message: 'No permission to operate this product' };
   }
-  if (spu.status !== 'DRAFT') {
-    return { error: 'INVALID_STATE', message: 'Only draft products can be submitted' };
+  if (spu.status !== 'DRAFT' && spu.status !== 'REJECTED') {
+    return { error: 'INVALID_STATE', message: 'Only draft or rejected products can be submitted' };
   }
   spu.status = 'PENDING_AUDIT';
   spu.submittedAt = new Date().toISOString();
+  delete spu.rejectReason;
   return {
     spuId: spu.spuId,
     status: spu.status,
@@ -352,7 +406,11 @@ export function auditProduct(spuId, adminId, approved, reason) {
     return { error: 'REASON_REQUIRED', message: '驳回须填写原因' };
   }
   spu.status = approved ? 'ON_SHELF' : 'REJECTED';
-  if (!approved) spu.rejectReason = reason;
+  if (approved) {
+    delete spu.rejectReason;
+  } else {
+    spu.rejectReason = reason.trim();
+  }
   productAudits.push({
     id: productAudits.length + 1,
     spuId,
@@ -519,6 +577,45 @@ export function getOrderById(userId, orderId) {
   const order = orders.find((o) => o.orderId === orderId && o.userId === userId);
   if (!order) return null;
   return serializeOrder(order, { includeSubOrders: true });
+}
+
+export function getAdminOrders({ orderNo, userId, merchantId, status, page = 1, pageSize = 20 } = {}) {
+  expirePendingOrders();
+  let list = [...orders];
+  if (orderNo?.trim()) {
+    const q = orderNo.trim();
+    list = list.filter((o) => o.orderNo.includes(q));
+  }
+  if (userId != null && userId !== '') {
+    const uid = Number(userId);
+    if (Number.isInteger(uid)) list = list.filter((o) => o.userId === uid);
+  }
+  if (merchantId != null && merchantId !== '') {
+    const mid = Number(merchantId);
+    if (Number.isInteger(mid)) {
+      list = list.filter((o) => o.subOrders.some((s) => s.merchantId === mid));
+    }
+  }
+  if (status) list = list.filter((o) => o.status === status);
+  list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const start = (page - 1) * pageSize;
+  return {
+    total: list.length,
+    list: list.slice(start, start + pageSize).map((o) => ({
+      ...serializeOrder(o),
+      userId: o.userId,
+    })),
+  };
+}
+
+export function getAdminOrderById(orderId) {
+  expirePendingOrders();
+  const order = orders.find((o) => o.orderId === orderId);
+  if (!order) return null;
+  return {
+    ...serializeOrder(order, { includeSubOrders: true }),
+    userId: order.userId,
+  };
 }
 
 export function payOrder(userId, orderId) {

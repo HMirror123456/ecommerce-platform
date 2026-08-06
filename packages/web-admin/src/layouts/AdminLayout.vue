@@ -22,9 +22,13 @@ function logout() {
     <el-aside width="220px" class="sidebar">
       <div class="logo">平台管理后台</div>
       <el-menu :default-active="activeMenu" router background-color="#001529" text-color="#fff" active-text-color="#ffd04b">
-        <el-menu-item index="/audit/products">
+        <el-menu-item v-if="auth.isOperator" index="/audit/products">
           <el-icon><Goods /></el-icon>
           <span>商品审核</span>
+        </el-menu-item>
+        <el-menu-item index="/orders">
+          <el-icon><List /></el-icon>
+          <span>订单查询</span>
         </el-menu-item>
       </el-menu>
     </el-aside>

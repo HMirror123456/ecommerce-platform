@@ -4,6 +4,7 @@ import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import ordersRoutes from './routes/orders.js';
 import merchantRoutes from './routes/merchant.js';
+import productsRoutes from './routes/products.js';
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -15,6 +16,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/merchant', merchantRoutes);
+app.use('/api/products', productsRoutes);
 app.use((_req, res) => res.status(404).json({ message: 'Not Found' }));
 
 app.listen(PORT, () => {
