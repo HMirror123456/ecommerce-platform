@@ -24,6 +24,12 @@ const router = createRouter({
           meta: { title: '订单列表' },
         },
         {
+          path: 'after-sales',
+          name: 'after-sales',
+          component: () => import('@/views/AfterSaleListView.vue'),
+          meta: { title: '售后处理' },
+        },
+        {
           path: 'products',
           name: 'products',
           component: () => import('@/views/ProductListView.vue'),
