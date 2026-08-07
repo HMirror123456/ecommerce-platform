@@ -17,6 +17,7 @@ const products = ref([]);
 const total = ref(0);
 const submittingSpuId = ref(null);
 const keyword = ref('');
+const categoryFilter = ref('');
 const statusFilter = ref('');
 const router = useRouter();
 
@@ -28,20 +29,40 @@ const statusMap = PRODUCT_STATUS_OPTIONS.reduce((map, item) => {
 const filteredProducts = computed(() => {
   const q = keyword.value.trim().toLowerCase();
   return products.value.filter((item) => {
+    const matchCategory = !categoryFilter.value || getCategoryFilterValue(item) === categoryFilter.value;
     const matchStatus = !statusFilter.value || item.status === statusFilter.value;
-    if (!q) return matchStatus;
+    if (!q) return matchCategory && matchStatus;
 
     const searchable = [
       item.spuId,
       item.title,
       item.categoryId,
+      item.categoryName,
+      getCategoryLabel(item),
     ]
       .filter((value) => value != null)
       .map((value) => String(value).toLowerCase());
 
-    return matchStatus && searchable.some((value) => value.includes(q));
+    return matchCategory && matchStatus && searchable.some((value) => value.includes(q));
   });
 });
+
+const categoryOptions = computed(() => {
+  const categoryMap = new Map();
+  for (const item of products.value) {
+    const key = getCategoryFilterValue(item);
+    if (!key) continue;
+    if (!categoryMap.has(key)) {
+      categoryMap.set(key, {
+        value: key,
+        label: getCategoryLabel(item),
+      });
+    }
+  }
+  return Array.from(categoryMap.values()).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
+});
+
+const imageErrorMap = ref({});
 
 function formatTime(iso) {
   if (!iso) return '-';
@@ -76,6 +97,26 @@ function getStockSummary(row) {
   );
 }
 
+function getCategoryLabel(row) {
+  return row?.categoryName || (row?.categoryId != null ? String(row.categoryId) : '-');
+}
+
+function getCategoryFilterValue(row) {
+  return row?.categoryName || (row?.categoryId != null ? String(row.categoryId) : '');
+}
+
+function hasProductImage(row) {
+  return Boolean(row?.mainImage) && !imageErrorMap.value[row.spuId];
+}
+
+function markImageError(row) {
+  if (!row?.spuId) return;
+  imageErrorMap.value = {
+    ...imageErrorMap.value,
+    [row.spuId]: true,
+  };
+}
+
 async function loadProducts() {
   loading.value = true;
   try {
@@ -93,6 +134,7 @@ async function loadProducts() {
 
 function resetFilters() {
   keyword.value = '';
+  categoryFilter.value = '';
   statusFilter.value = '';
 }
 
@@ -161,8 +203,16 @@ onMounted(loadProducts);
         v-model="keyword"
         clearable
         class="keyword-input"
-        placeholder="搜索商品标题 / 商品ID / 分类ID"
+        placeholder="搜索商品标题 / 商品ID"
       />
+      <el-select v-model="categoryFilter" clearable placeholder="商品分类" class="category-filter">
+        <el-option
+          v-for="item in categoryOptions"
+          :key="item.value"
+          :label="item.label"
+          :value="item.value"
+        />
+      </el-select>
       <el-select v-model="statusFilter" clearable placeholder="全部状态" class="status-filter">
         <el-option label="全部" value="" />
         <el-option
@@ -177,12 +227,24 @@ onMounted(loadProducts);
 
     <el-table v-loading="loading" :data="filteredProducts" stripe>
       <template #empty>
-        <el-empty description="暂无符合条件的商品" />
+        <el-empty description="暂无符合条件的商品。" />
       </template>
       <el-table-column prop="spuId" label="商品ID" width="100" />
+      <el-table-column label="商品图片" width="96">
+        <template #default="{ row }">
+          <img
+            v-if="hasProductImage(row)"
+            :src="row.mainImage"
+            :alt="row.title"
+            class="product-thumb"
+            @error="markImageError(row)"
+          />
+          <div v-else class="product-thumb placeholder">暂无图片</div>
+        </template>
+      </el-table-column>
       <el-table-column prop="title" label="商品标题" min-width="220" show-overflow-tooltip />
-      <el-table-column label="分类ID" width="100">
-        <template #default="{ row }">{{ row.categoryId ?? '-' }}</template>
+      <el-table-column label="商品分类" min-width="140" show-overflow-tooltip>
+        <template #default="{ row }">{{ getCategoryLabel(row) }}</template>
       </el-table-column>
       <el-table-column label="商品状态" width="110">
         <template #default="{ row }">
@@ -258,8 +320,26 @@ onMounted(loadProducts);
 .keyword-input {
   width: 360px;
 }
+.category-filter {
+  width: 180px;
+}
 .status-filter {
   width: 160px;
+}
+.product-thumb {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  object-fit: cover;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  background: #f7f8fa;
+  color: #999;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
 }
 .stock {
   display: flex;

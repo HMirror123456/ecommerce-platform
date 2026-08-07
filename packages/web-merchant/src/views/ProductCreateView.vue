@@ -1,12 +1,20 @@
 <script setup>
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRouter } from 'vue-router';
-import { createMerchantProduct } from '@/api/merchant';
+import { createMerchantProduct, fetchCategories } from '@/api/merchant';
 
 const router = useRouter();
 const formRef = ref(null);
 const submitting = ref(false);
+const categoryLoading = ref(false);
+const categories = ref([]);
+const categoryProps = {
+  value: 'id',
+  label: 'name',
+  children: 'children',
+  emitPath: false,
+};
 
 function createSku() {
   return {
@@ -70,12 +78,12 @@ const rules = {
   categoryId: [
     {
       validator: (_rule, value, callback) => {
-        if (value == null || value === '') {
-          callback(new Error('请输入分类ID'));
+        if (value == null || value === '' || Array.isArray(value)) {
+          callback(new Error('请选择商品分类'));
           return;
         }
         if (!Number.isInteger(Number(value))) {
-          callback(new Error('请输入有效的分类ID'));
+          callback(new Error('请选择有效的商品分类'));
           return;
         }
         callback();
@@ -95,6 +103,19 @@ const skuAvailableRules = [nonNegativeIntegerRule('请输入可用库存')];
 
 function getSkuField(index, field) {
   return `skus.${index}.${field}`;
+}
+
+async function loadCategories() {
+  categoryLoading.value = true;
+  try {
+    const data = await fetchCategories();
+    categories.value = Array.isArray(data) ? data : [];
+  } catch (e) {
+    ElMessage.error(e.message || '加载商品分类失败');
+    categories.value = [];
+  } finally {
+    categoryLoading.value = false;
+  }
 }
 
 function addSku() {
@@ -128,6 +149,17 @@ function buildPayload() {
 }
 
 async function submitProduct() {
+  const hasSku = form.value.skus.some((sku) =>
+    String(sku.specName || '').trim()
+    || String(sku.specValue || '').trim()
+    || sku.price != null
+    || sku.available != null
+  );
+  if (!hasSku) {
+    ElMessage.warning('请至少填写一个 SKU');
+    return;
+  }
+
   const valid = await formRef.value?.validate().catch(() => false);
   if (!valid) return;
 
@@ -142,6 +174,8 @@ async function submitProduct() {
     submitting.value = false;
   }
 }
+
+onMounted(loadCategories);
 </script>
 
 <template>
@@ -159,8 +193,17 @@ async function submitProduct() {
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="product-form">
       <el-row :gutter="16">
         <el-col :xs="24" :sm="12">
-          <el-form-item label="分类ID" prop="categoryId">
-            <el-input-number v-model="form.categoryId" :min="0" :precision="0" controls-position="right" class="full-width" />
+          <el-form-item label="商品分类" prop="categoryId">
+            <el-cascader
+              v-model="form.categoryId"
+              :options="categories"
+              :props="categoryProps"
+              :disabled="categoryLoading"
+              clearable
+              filterable
+              :placeholder="categoryLoading ? '正在加载商品分类' : '请选择商品分类'"
+              class="full-width"
+            />
           </el-form-item>
         </el-col>
         <el-col :xs="24" :sm="12">
