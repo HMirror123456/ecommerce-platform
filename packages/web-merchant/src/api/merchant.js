@@ -12,6 +12,10 @@ export function getDashboardSummary() {
   return client.get('/merchant/dashboard/summary').then((r) => r.data);
 }
 
+export function fetchCategories() {
+  return client.get('/categories').then((r) => r.data);
+}
+
 export function shipMerchantOrder(subOrderId, payload) {
   return client.post(`/merchant/orders/${subOrderId}/ship`, payload).then((r) => r.data);
 }

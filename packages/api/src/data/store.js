@@ -218,12 +218,12 @@ function findCategoryById(categoryId, nodes = categories) {
   return null;
 }
 
-function findCategoryPath(categoryId, nodes = categories, path = []) {
+function findRootCategoryById(categoryId, nodes = categories, root = null) {
   for (const node of nodes) {
-    const nextPath = [...path, { id: node.id, name: node.name }];
-    if (node.id === categoryId) return nextPath;
-    const childPath = findCategoryPath(categoryId, node.children || [], nextPath);
-    if (childPath) return childPath;
+    const currentRoot = root || node;
+    if (node.id === categoryId) return currentRoot;
+    const childRoot = findRootCategoryById(categoryId, node.children || [], currentRoot);
+    if (childRoot) return childRoot;
   }
   return null;
 }
@@ -240,22 +240,22 @@ function getCategoryFilterIds(categoryId) {
 }
 
 function getCategoryInfo(categoryId) {
-  const path = findCategoryPath(categoryId) || [];
-  const leaf = path[path.length - 1];
+  const category = findRootCategoryById(categoryId);
   return {
     categoryId,
-    categoryName: leaf?.name || null,
-    categoryPath: path,
+    categoryName: category?.name || null,
   };
 }
 
 function serializeMerchantProduct(spu) {
+  const category = getCategoryInfo(spu.categoryId);
   const product = {
     spuId: spu.spuId,
     shopId: spu.shopId,
     shopName: spu.shopName,
     merchantId: spu.merchantId,
-    categoryId: spu.categoryId,
+    categoryId: category.categoryId,
+    categoryName: category.categoryName,
     title: spu.title,
     description: spu.description,
     mainImage: spu.mainImage,
@@ -294,7 +294,6 @@ function serializePublicProductDetail(spu) {
     spuId: spu.spuId,
     categoryId: category.categoryId,
     categoryName: category.categoryName,
-    categoryPath: category.categoryPath,
     title: spu.title,
     description: spu.description,
     mainImage: spu.mainImage,

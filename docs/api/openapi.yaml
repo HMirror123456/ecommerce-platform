@@ -1052,6 +1052,9 @@ components:
           type: integer
         categoryId:
           type: integer
+        categoryName:
+          type: string
+          nullable: true
         title:
           type: string
         description:
@@ -1156,14 +1159,6 @@ components:
           items:
             $ref: '#/components/schemas/Category'
 
-    CategoryPathItem:
-      type: object
-      properties:
-        id:
-          type: integer
-        name:
-          type: string
-
     ProductListResponse:
       type: object
       properties:
@@ -1202,10 +1197,6 @@ components:
         categoryName:
           type: string
           nullable: true
-        categoryPath:
-          type: array
-          items:
-            $ref: '#/components/schemas/CategoryPathItem'
         title:
           type: string
         description:
