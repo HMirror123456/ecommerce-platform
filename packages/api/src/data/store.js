@@ -33,12 +33,31 @@ export const users = [
   },
 ];
 
+export const categories = [
+  {
+    id: 1,
+    name: '数码',
+    children: [
+      { id: 11, name: '耳机', children: [] },
+      { id: 12, name: '电脑外设', children: [] },
+    ],
+  },
+  {
+    id: 2,
+    name: '家居生活',
+    children: [
+      { id: 21, name: '照明', children: [] },
+    ],
+  },
+];
+
 export const spus = [
   {
     spuId: 101,
     shopId: 1,
     shopName: '数码旗舰店',
     merchantId: 1,
+    categoryId: 11,
     title: '无线蓝牙耳机 Pro',
     description: '主动降噪，续航 30 小时',
     mainImage: 'https://picsum.photos/seed/spu101/200/200',
@@ -54,6 +73,7 @@ export const spus = [
     shopId: 2,
     shopName: '家居生活馆',
     merchantId: 2,
+    categoryId: 21,
     title: '北欧简约台灯',
     description: '三档调光，护眼设计',
     mainImage: 'https://picsum.photos/seed/spu102/200/200',
@@ -66,6 +86,7 @@ export const spus = [
     shopId: 1,
     shopName: '数码旗舰店',
     merchantId: 1,
+    categoryId: 12,
     title: '机械键盘 87 键',
     description: '青轴，RGB 背光',
     mainImage: 'https://picsum.photos/seed/spu103/200/200',
@@ -188,6 +209,46 @@ function ownsSpu(merchant, spu) {
   return spu.shopId === merchant.shopId;
 }
 
+function findCategoryById(categoryId, nodes = categories) {
+  for (const node of nodes) {
+    if (node.id === categoryId) return node;
+    const child = findCategoryById(categoryId, node.children || []);
+    if (child) return child;
+  }
+  return null;
+}
+
+function findCategoryPath(categoryId, nodes = categories, path = []) {
+  for (const node of nodes) {
+    const nextPath = [...path, { id: node.id, name: node.name }];
+    if (node.id === categoryId) return nextPath;
+    const childPath = findCategoryPath(categoryId, node.children || [], nextPath);
+    if (childPath) return childPath;
+  }
+  return null;
+}
+
+function collectCategoryIds(category) {
+  return [category.id, ...(category.children || []).flatMap(collectCategoryIds)];
+}
+
+function getCategoryFilterIds(categoryId) {
+  const cid = Number(categoryId);
+  if (!Number.isInteger(cid)) return null;
+  const category = findCategoryById(cid);
+  return category ? collectCategoryIds(category) : [cid];
+}
+
+function getCategoryInfo(categoryId) {
+  const path = findCategoryPath(categoryId) || [];
+  const leaf = path[path.length - 1];
+  return {
+    categoryId,
+    categoryName: leaf?.name || null,
+    categoryPath: path,
+  };
+}
+
 function serializeMerchantProduct(spu) {
   const product = {
     spuId: spu.spuId,
@@ -216,8 +277,11 @@ function serializeMerchantProduct(spu) {
 
 function serializePublicProductSummary(spu) {
   const prices = spu.skus.map((s) => s.price);
+  const category = getCategoryInfo(spu.categoryId);
   return {
     spuId: spu.spuId,
+    categoryId: category.categoryId,
+    categoryName: category.categoryName,
     title: spu.title,
     mainImage: spu.mainImage,
     minPrice: prices.length ? Math.min(...prices) : 0,
@@ -225,8 +289,12 @@ function serializePublicProductSummary(spu) {
 }
 
 function serializePublicProductDetail(spu) {
+  const category = getCategoryInfo(spu.categoryId);
   return {
     spuId: spu.spuId,
+    categoryId: category.categoryId,
+    categoryName: category.categoryName,
+    categoryPath: category.categoryPath,
     title: spu.title,
     description: spu.description,
     mainImage: spu.mainImage,
@@ -411,14 +479,18 @@ export function getPublicProducts(page = 1, pageSize = 20, categoryId) {
   expirePendingOrders();
   let list = spus.filter((s) => s.status === 'ON_SHELF');
   if (categoryId != null && categoryId !== '') {
-    const cid = Number(categoryId);
-    if (Number.isInteger(cid)) list = list.filter((s) => s.categoryId === cid);
+    const categoryIds = getCategoryFilterIds(categoryId);
+    if (categoryIds) list = list.filter((s) => categoryIds.includes(s.categoryId));
   }
   const start = (page - 1) * pageSize;
   return {
     total: list.length,
     list: list.slice(start, start + pageSize).map(serializePublicProductSummary),
   };
+}
+
+export function getCategories() {
+  return categories;
 }
 
 export function getPublicProductDetail(spuId) {

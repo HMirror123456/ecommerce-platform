@@ -92,6 +92,20 @@ paths:
                 $ref: '#/components/schemas/AdminAuthResponse'
 
   # ========== Product (C端) ==========
+  /categories:
+    get:
+      tags: [product]
+      summary: 商品分类树
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+
   /products:
     get:
       tags: [product]
@@ -1130,6 +1144,26 @@ components:
         message:
           type: string
 
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+
+    CategoryPathItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
     ProductListResponse:
       type: object
       properties:
@@ -1145,6 +1179,11 @@ components:
       properties:
         spuId:
           type: integer
+        categoryId:
+          type: integer
+        categoryName:
+          type: string
+          nullable: true
         title:
           type: string
         mainImage:
@@ -1158,6 +1197,15 @@ components:
       properties:
         spuId:
           type: integer
+        categoryId:
+          type: integer
+        categoryName:
+          type: string
+          nullable: true
+        categoryPath:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryPathItem'
         title:
           type: string
         description:
