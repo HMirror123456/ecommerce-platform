@@ -50,6 +50,9 @@ async function onSubmit() {
         </el-form-item>
         <el-button type="primary" class="submit" :loading="loading" @click="onSubmit">登录</el-button>
       </el-form>
+      <div class="footer-link">
+        <router-link to="/onboarding">还没有商家账号？申请入驻</router-link>
+      </div>
     </div>
   </div>
 </template>
@@ -72,4 +75,6 @@ async function onSubmit() {
 h1 { margin: 0 0 8px; font-size: 22px; text-align: center; }
 .subtitle { margin: 0 0 24px; text-align: center; color: #999; font-size: 13px; }
 .submit { width: 100%; margin-top: 8px; }
+.footer-link { margin-top: 16px; text-align: center; font-size: 13px; }
+.footer-link a { color: #409eff; text-decoration: none; }
 </style>

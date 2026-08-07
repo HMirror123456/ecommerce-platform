@@ -188,6 +188,10 @@ paths:
       responses:
         '201':
           description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
 
   /cart/items/{itemId}:
     put:
@@ -212,6 +216,10 @@ paths:
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
     delete:
       tags: [cart]
       summary: 删除购物车项
@@ -226,6 +234,101 @@ paths:
       responses:
         '204':
           description: No Content
+
+  # ========== User Addresses ==========
+  /users/addresses:
+    get:
+      tags: [user]
+      summary: 当前用户收货地址列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Address'
+    post:
+      tags: [user]
+      summary: 新增收货地址
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAddressRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+
+  /users/addresses/{addressId}:
+    put:
+      tags: [user]
+      summary: 修改收货地址
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: addressId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAddressRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+    delete:
+      tags: [user]
+      summary: 删除收货地址
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: addressId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: No Content
+
+  /users/addresses/{addressId}/default:
+    patch:
+      tags: [user]
+      summary: 设为默认地址
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: addressId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
 
   # ========== Order ==========
   /orders:
@@ -362,6 +465,36 @@ paths:
           description: OK
 
   # ========== Merchant ==========
+  /merchant/applications:
+    post:
+      tags: [merchant]
+      summary: 提交商家入驻申请（无需登录）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MerchantApplicationSubmitRequest'
+      responses:
+        '201':
+          description: Created
+        '409':
+          description: 重复申请或已入驻
+
+  /merchant/applications/status:
+    get:
+      tags: [merchant]
+      summary: 按手机号查询入驻申请进度（无需登录）
+      parameters:
+        - name: contactPhone
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+
   /merchant/dashboard/summary:
     get:
       tags: [merchant]
@@ -527,6 +660,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminDashboardSummary'
 
+  /admin/products/audits:
+    get:
+      tags: [admin]
+      summary: 商品审核历史记录
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: approved
+          in: query
+          schema:
+            type: string
+            enum: ['true', 'false']
+          description: 筛选通过/驳回
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductAuditListResponse'
+
   /admin/products/pending:
     get:
       tags: [admin]
@@ -682,6 +846,36 @@ paths:
         '200':
           description: OK
 
+  /admin/merchants/applications:
+    get:
+      tags: [admin]
+      summary: 商家入驻申请列表（可按状态筛选）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            description: PENDING / APPROVED / REJECTED / ALL，多个用逗号分隔
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MerchantApplicationListResponse'
+
   /admin/merchants/pending:
     get:
       tags: [admin]
@@ -811,6 +1005,83 @@ components:
         pendingMerchantCount:
           type: integer
           description: 待审核商家入驻数
+        auditedProductCount:
+          type: integer
+          description: 累计已审核商品次数
+        onShelfProductCount:
+          type: integer
+          description: 已上架商品数
+        rejectedProductCount:
+          type: integer
+          description: 已驳回商品数
+        totalOrderCount:
+          type: integer
+          description: 全平台订单总数
+        pendingPaymentOrderCount:
+          type: integer
+          description: 待支付订单数
+        recentPendingProducts:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingProductSummary'
+        recentPendingMerchants:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingMerchant'
+        recentEscalatedAfterSales:
+          type: array
+          items:
+            $ref: '#/components/schemas/AfterSale'
+
+    ProductAuditRecord:
+      type: object
+      properties:
+        auditId:
+          type: integer
+        spuId:
+          type: integer
+        approved:
+          type: boolean
+        reason:
+          type: string
+        auditedAt:
+          type: string
+          format: date-time
+        adminId:
+          type: integer
+        title:
+          type: string
+        shopName:
+          type: string
+        merchantId:
+          type: integer
+        mainImage:
+          type: string
+        status:
+          $ref: '#/components/schemas/ProductStatus'
+
+    ProductAuditListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductAuditRecord'
+
+    PendingProductSummary:
+      type: object
+      properties:
+        spuId:
+          type: integer
+        title:
+          type: string
+        shopName:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
 
     AfterSaleType:
       type: string
@@ -933,6 +1204,7 @@ components:
       properties:
         merchantId:
           type: integer
+          description: 申请 ID
         shopName:
           type: string
         contactName:
@@ -942,6 +1214,46 @@ components:
         appliedAt:
           type: string
           format: date-time
+
+    MerchantApplicationSubmitRequest:
+      type: object
+      required: [shopName, contactName, contactPhone]
+      properties:
+        shopName:
+          type: string
+        contactName:
+          type: string
+        contactPhone:
+          type: string
+
+    MerchantApplication:
+      allOf:
+        - $ref: '#/components/schemas/PendingMerchant'
+        - type: object
+          properties:
+            status:
+              type: string
+              enum: [PENDING, APPROVED, REJECTED]
+            auditedAt:
+              type: string
+              format: date-time
+            rejectReason:
+              type: string
+            approvedMerchantId:
+              type: integer
+            merchantUsername:
+              type: string
+              description: 审核通过后生成的商家登录账号
+
+    MerchantApplicationListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/MerchantApplication'
 
     OrderListResponse:
       type: object
@@ -1233,7 +1545,84 @@ components:
         quantity:
           type: integer
         sku:
-          $ref: '#/components/schemas/Sku'
+          $ref: '#/components/schemas/CartSkuSnapshot'
+
+    CartSkuSnapshot:
+      type: object
+      properties:
+        skuId:
+          type: integer
+        specJson:
+          type: object
+          additionalProperties:
+            type: string
+        price:
+          type: number
+        stock:
+          type: integer
+        title:
+          type: string
+        mainImage:
+          type: string
+        shopName:
+          type: string
+
+    Address:
+      type: object
+      properties:
+        id:
+          type: integer
+        receiverName:
+          type: string
+        phone:
+          type: string
+        province:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        detail:
+          type: string
+        isDefault:
+          type: boolean
+
+    CreateAddressRequest:
+      type: object
+      required: [receiverName, phone, province, city, district, detail]
+      properties:
+        receiverName:
+          type: string
+        phone:
+          type: string
+        province:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        detail:
+          type: string
+        isDefault:
+          type: boolean
+
+    UpdateAddressRequest:
+      type: object
+      properties:
+        receiverName:
+          type: string
+        phone:
+          type: string
+        province:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        detail:
+          type: string
+        isDefault:
+          type: boolean
 
     CreateOrderRequest:
       type: object

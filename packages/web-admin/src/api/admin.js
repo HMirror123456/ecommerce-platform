@@ -8,6 +8,10 @@ export function fetchPendingProducts(params) {
   return client.get('/admin/products/pending', { params }).then((r) => r.data);
 }
 
+export function fetchProductAudits(params) {
+  return client.get('/admin/products/audits', { params }).then((r) => r.data);
+}
+
 export function fetchProductDetail(spuId) {
   return client.get(`/admin/products/${spuId}`).then((r) => r.data);
 }
@@ -34,4 +38,12 @@ export function fetchEscalatedAfterSales(params) {
 
 export function fetchPendingMerchants() {
   return client.get('/admin/merchants/pending').then((r) => r.data);
+}
+
+export function fetchMerchantApplications(params) {
+  return client.get('/admin/merchants/applications', { params }).then((r) => r.data);
+}
+
+export function auditMerchant(applicationId, approved, reason) {
+  return client.post(`/admin/merchants/${applicationId}/audit`, { approved, reason }).then((r) => r.data);
 }

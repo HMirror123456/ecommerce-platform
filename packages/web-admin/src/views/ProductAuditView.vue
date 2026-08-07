@@ -1,8 +1,9 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { auditProduct, fetchPendingProducts, fetchProductDetail } from '@/api/admin';
+import { auditProduct, fetchPendingProducts, fetchProductAudits, fetchProductDetail } from '@/api/admin';
 
+const activeTab = ref('pending');
 const loading = ref(false);
 const list = ref([]);
 const total = ref(0);
@@ -18,6 +19,11 @@ const rejectReason = ref('');
 const rejectTargetId = ref(null);
 const actionLoading = ref(false);
 
+const auditResultMap = {
+  true: { label: '已通过', type: 'success' },
+  false: { label: '已驳回', type: 'danger' },
+};
+
 function formatTime(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN');
@@ -31,9 +37,15 @@ function formatSpec(specJson) {
 async function loadList() {
   loading.value = true;
   try {
-    const data = await fetchPendingProducts({ page: page.value, pageSize: pageSize.value });
-    list.value = data.list || [];
-    total.value = data.total || 0;
+    if (activeTab.value === 'pending') {
+      const data = await fetchPendingProducts({ page: page.value, pageSize: pageSize.value });
+      list.value = data.list || [];
+      total.value = data.total || 0;
+    } else {
+      const data = await fetchProductAudits({ page: page.value, pageSize: pageSize.value });
+      list.value = data.list || [];
+      total.value = data.total || 0;
+    }
   } catch (e) {
     ElMessage.error(e.message || '加载失败');
   } finally {
@@ -96,10 +108,12 @@ async function submitReject() {
   }
 }
 
-function onPageChange(p) {
-  page.value = p;
+function onTabChange() {
+  page.value = 1;
   loadList();
 }
+
+watch(page, () => loadList());
 
 onMounted(loadList);
 </script>
@@ -108,28 +122,58 @@ onMounted(loadList);
   <el-card shadow="never">
     <template #header>
       <div class="card-header">
-        <span>待审核商品</span>
-        <el-tag type="warning">PENDING_AUDIT → ON_SHELF / REJECTED</el-tag>
+        <span>商品审核</span>
+        <el-tag type="info">PENDING_AUDIT → ON_SHELF / REJECTED</el-tag>
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="list" stripe empty-text="暂无待审核商品">
+    <el-tabs v-model="activeTab" @tab-change="onTabChange">
+      <el-tab-pane label="待审核" name="pending" />
+      <el-tab-pane label="已审核" name="completed" />
+      <el-tab-pane label="全部记录" name="all" />
+    </el-tabs>
+
+    <el-table
+      v-loading="loading"
+      :data="list"
+      stripe
+      :empty-text="activeTab === 'pending' ? '暂无待审核商品' : '暂无审核记录'"
+    >
       <el-table-column label="主图" width="80">
         <template #default="{ row }">
-          <el-image :src="row.mainImage" fit="cover" class="thumb" />
+          <el-image v-if="row.mainImage" :src="row.mainImage" fit="cover" class="thumb" />
+          <span v-else>-</span>
         </template>
       </el-table-column>
       <el-table-column prop="title" label="商品标题" min-width="180" show-overflow-tooltip />
       <el-table-column prop="shopName" label="店铺" width="140" />
-      <el-table-column prop="merchantId" label="商家ID" width="90" />
-      <el-table-column label="提交时间" width="170">
+      <el-table-column v-if="activeTab === 'pending'" prop="merchantId" label="商家ID" width="90" />
+      <el-table-column v-if="activeTab === 'pending'" label="提交时间" width="170">
         <template #default="{ row }">{{ formatTime(row.submittedAt) }}</template>
+      </el-table-column>
+      <el-table-column v-if="activeTab !== 'pending'" label="审核结果" width="100">
+        <template #default="{ row }">
+          <el-tag :type="auditResultMap[row.approved]?.type" size="small">
+            {{ auditResultMap[row.approved]?.label }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="activeTab !== 'pending'" label="审核时间" width="170">
+        <template #default="{ row }">{{ formatTime(row.auditedAt) }}</template>
+      </el-table-column>
+      <el-table-column v-if="activeTab !== 'pending'" label="当前状态" width="120">
+        <template #default="{ row }">{{ row.status || '-' }}</template>
+      </el-table-column>
+      <el-table-column v-if="activeTab !== 'pending'" label="驳回原因" min-width="160" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.reason || '-' }}</template>
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row)">详情</el-button>
-          <el-button link type="success" :disabled="actionLoading" @click="handleApprove(row)">通过</el-button>
-          <el-button link type="danger" :disabled="actionLoading" @click="openReject(row)">驳回</el-button>
+          <template v-if="activeTab === 'pending'">
+            <el-button link type="success" :disabled="actionLoading" @click="handleApprove(row)">通过</el-button>
+            <el-button link type="danger" :disabled="actionLoading" @click="openReject(row)">驳回</el-button>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -140,7 +184,6 @@ onMounted(loadList);
         :page-size="pageSize"
         :total="total"
         layout="total, prev, pager, next"
-        @current-change="onPageChange"
       />
     </div>
   </el-card>

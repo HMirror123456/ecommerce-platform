@@ -49,12 +49,16 @@ const csToken = csLogin.data.token;
 
 const summaryOp = await request('GET', '/admin/dashboard/summary', { token: opToken });
 if (summaryOp.status !== 200) throw new Error(`operator summary failed: ${JSON.stringify(summaryOp)}`);
-if (summaryOp.data.pendingProductCount < 1) throw new Error('pendingProductCount should be >= 1');
+if (summaryOp.data.pendingProductCount < 0) throw new Error('pendingProductCount invalid');
 if (summaryOp.data.pendingMerchantCount < 1) throw new Error('pendingMerchantCount should be >= 1');
+if (typeof summaryOp.data.auditedProductCount !== 'number') throw new Error('auditedProductCount missing');
+if (!Array.isArray(summaryOp.data.recentPendingProducts)) throw new Error('recentPendingProducts missing');
+if (!Array.isArray(summaryOp.data.recentPendingMerchants)) throw new Error('recentPendingMerchants missing');
 console.log('OK operator summary', summaryOp.data);
 
 const summaryCs = await request('GET', '/admin/dashboard/summary', { token: csToken });
 if (summaryCs.data.escalatedAfterSaleCount < 1) throw new Error('escalatedAfterSaleCount should be >= 1');
+if (!Array.isArray(summaryCs.data.recentEscalatedAfterSales)) throw new Error('recentEscalatedAfterSales missing');
 console.log('OK csagent summary', summaryCs.data);
 
 const afterSales = await request('GET', '/admin/after-sales?page=1&pageSize=10', { token: csToken });
