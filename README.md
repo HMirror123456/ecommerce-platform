@@ -60,7 +60,18 @@ ecommerce-platform/
 
 - 后端：Node.js + Express（`packages/api`）
 - 管理后台：Vue 3 + Vite + Element Plus（`packages/web-admin`）
-- 数据库：<!-- W2 接入 MySQL，当前 API 为内存 Mock -->
+- 数据库：MySQL 8（Batch-1 已接入：管理员/商家/入驻/商品审核记录）
+
+### 数据库启动（API 依赖 MySQL）
+
+```bash
+docker compose up -d          # 或本地安装 MySQL 8
+cd packages/api
+cp .env.example .env
+npm install && npm run db:setup && npm run dev
+```
+
+三人联调：共用同一 `DB_HOST` 的 `.env`。详见 [`packages/api/README.md`](packages/api/README.md) 与 [`docs/DB_MIGRATION.md`](docs/DB_MIGRATION.md)。
 
 ## 文档索引
 
@@ -74,3 +85,4 @@ ecommerce-platform/
 | [Git 协作](docs/GIT_WORKFLOW.md) | 分支与提交规范 |
 | [产品需求](docs/prd/PRD.md) | A/B 端功能清单（Admin 见 ADMIN.md） |
 | [报告模板](docs/REPORT_TEMPLATE.md) | W3 开发完成后撰写 |
+| [数据库迁移分工](docs/DB_MIGRATION.md) | MySQL 批次 2/3 接库指南（A/B） |

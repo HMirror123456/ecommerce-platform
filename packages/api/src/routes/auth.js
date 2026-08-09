@@ -4,33 +4,48 @@ import { signAdminToken, signMerchantToken, signUserToken } from '../middleware/
 
 const router = Router();
 
-router.post('/user/login', (req, res) => {
+router.post('/user/login', async (req, res) => {
   const { phone, password } = req.body || {};
   if (!phone || !password) return res.status(400).json({ message: '请输入手机号和密码' });
-  const user = findUserByPhone(phone);
-  if (!user || user.password !== password) return res.status(401).json({ message: '账号或密码错误' });
-  res.json({ token: signUserToken(user), userId: user.id });
+  try {
+    const user = await findUserByPhone(phone, password);
+    if (!user) return res.status(401).json({ message: '账号或密码错误' });
+    res.json({ token: signUserToken(user), userId: user.id });
+  } catch (err) {
+    console.error(err);
+    res.status(503).json({ message: '服务暂不可用，请确认数据库已启动' });
+  }
 });
 
-router.post('/merchant/login', (req, res) => {
+router.post('/merchant/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ message: '请输入账号和密码' });
-  const merchant = findMerchant(username, password);
-  if (!merchant) return res.status(401).json({ message: '账号或密码错误' });
-  res.json({
-    token: signMerchantToken(merchant),
-    merchantId: merchant.id,
-    shopId: merchant.shopId,
-    shopName: merchant.shopName,
-  });
+  try {
+    const merchant = await findMerchant(username, password);
+    if (!merchant) return res.status(401).json({ message: '账号或密码错误' });
+    res.json({
+      token: signMerchantToken(merchant),
+      merchantId: merchant.id,
+      shopId: merchant.shopId,
+      shopName: merchant.shopName,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(503).json({ message: '服务暂不可用，请确认数据库已启动' });
+  }
 });
 
-router.post('/admin/login', (req, res) => {
+router.post('/admin/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ message: '请输入账号和密码' });
-  const admin = findAdmin(username, password);
-  if (!admin) return res.status(401).json({ message: '账号或密码错误' });
-  res.json({ token: signAdminToken(admin), adminId: admin.id, role: admin.role });
+  try {
+    const admin = await findAdmin(username, password);
+    if (!admin) return res.status(401).json({ message: '账号或密码错误' });
+    res.json({ token: signAdminToken(admin), adminId: admin.id, role: admin.role });
+  } catch (err) {
+    console.error(err);
+    res.status(503).json({ message: '服务暂不可用，请确认数据库已启动' });
+  }
 });
 
 export default router;

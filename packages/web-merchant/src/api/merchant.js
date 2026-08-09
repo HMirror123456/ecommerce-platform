@@ -4,6 +4,14 @@ export function login(username, password) {
   return client.post('/auth/merchant/login', { username, password }).then((r) => r.data);
 }
 
+export function submitOnboardingApplication(payload) {
+  return client.post('/merchant/applications', payload).then((r) => r.data);
+}
+
+export function fetchOnboardingStatus(contactPhone) {
+  return client.get('/merchant/applications/status', { params: { contactPhone } }).then((r) => r.data);
+}
+
 export function fetchMerchantOrders(params) {
   return client.get('/merchant/orders', { params }).then((r) => r.data);
 }

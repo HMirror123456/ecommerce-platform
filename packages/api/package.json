@@ -5,11 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "node src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "db:migrate": "node scripts/run-sql.mjs ../../scripts/schema.sql",
+    "db:seed": "node scripts/run-sql.mjs ../../scripts/seed.sql",
+    "db:setup": "npm run db:migrate && npm run db:seed"
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.12.0"
   }
 }

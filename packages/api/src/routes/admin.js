@@ -1,21 +1,28 @@
 import { Router } from 'express';
 import {
+  auditMerchantApplication,
   auditProduct,
   getAdminOrderById,
   getAdminOrders,
   getAdminProductDetail,
   getDashboardSummary,
   getEscalatedAfterSales,
+  getMerchantApplications,
   getPendingMerchants,
   getPendingProducts,
+  getProductAuditHistory,
 } from '../data/store.js';
 import { requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 const adminRoles = ['OPERATOR', 'CS_AGENT'];
 
-router.get('/dashboard/summary', requireAdmin(adminRoles), (_req, res) => {
-  res.json(getDashboardSummary());
+router.get('/dashboard/summary', requireAdmin(adminRoles), async (_req, res, next) => {
+  try {
+    res.json(await getDashboardSummary());
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.get('/products/pending', requireAdmin(['OPERATOR']), (req, res) => {
@@ -24,44 +31,103 @@ router.get('/products/pending', requireAdmin(['OPERATOR']), (req, res) => {
   res.json(getPendingProducts(page, pageSize));
 });
 
+router.get('/products/audits', requireAdmin(['OPERATOR']), async (req, res, next) => {
+  try {
+    const { approved } = req.query;
+    const page = Number(req.query.page) || 1;
+    const pageSize = Number(req.query.pageSize) || 20;
+    let approvedFilter;
+    if (approved === 'true') approvedFilter = true;
+    else if (approved === 'false') approvedFilter = false;
+    res.json(await getProductAuditHistory({ approved: approvedFilter, page, pageSize }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/products/:spuId', requireAdmin(['OPERATOR']), (req, res) => {
   const product = getAdminProductDetail(Number(req.params.spuId));
   if (!product) return res.status(404).json({ message: '商品不存在' });
   res.json(product);
 });
 
-router.post('/products/:spuId/audit', requireAdmin(['OPERATOR']), (req, res) => {
-  const spuId = Number(req.params.spuId);
-  const { approved, reason } = req.body || {};
-  if (typeof approved !== 'boolean') return res.status(400).json({ message: 'approved 必填' });
-  const result = auditProduct(spuId, req.admin.id, approved, reason);
-  if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
-  if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
-  if (result.error === 'REASON_REQUIRED') return res.status(400).json({ message: result.message });
-  res.json({ spuId: result.spu.spuId, status: result.spu.status, message: approved ? '审核通过' : '已驳回' });
+router.post('/products/:spuId/audit', requireAdmin(['OPERATOR']), async (req, res, next) => {
+  try {
+    const spuId = Number(req.params.spuId);
+    const { approved, reason } = req.body || {};
+    if (typeof approved !== 'boolean') return res.status(400).json({ message: 'approved 必填' });
+    const result = await auditProduct(spuId, req.admin.id, approved, reason);
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    if (result.error === 'REASON_REQUIRED') return res.status(400).json({ message: result.message });
+    res.json({ spuId: result.spu.spuId, status: result.spu.status, message: approved ? '审核通过' : '已驳回' });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/orders', requireAdmin(adminRoles), (req, res) => {
-  const { orderNo, userId, merchantId, status } = req.query;
-  const page = Number(req.query.page) || 1;
-  const pageSize = Number(req.query.pageSize) || 20;
-  res.json(getAdminOrders({ orderNo, userId, merchantId, status, page, pageSize }));
+router.get('/orders', requireAdmin(adminRoles), async (req, res, next) => {
+  try {
+    const { orderNo, userId, merchantId, status } = req.query;
+    const page = Number(req.query.page) || 1;
+    const pageSize = Number(req.query.pageSize) || 20;
+    res.json(await getAdminOrders({ orderNo, userId, merchantId, status, page, pageSize }));
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/orders/:orderId', requireAdmin(adminRoles), (req, res) => {
-  const order = getAdminOrderById(Number(req.params.orderId));
-  if (!order) return res.status(404).json({ message: '订单不存在' });
-  res.json(order);
+router.get('/orders/:orderId', requireAdmin(adminRoles), async (req, res, next) => {
+  try {
+    const order = await getAdminOrderById(Number(req.params.orderId));
+    if (!order) return res.status(404).json({ message: '订单不存在' });
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/after-sales', requireAdmin(['CS_AGENT']), (req, res) => {
-  const page = Number(req.query.page) || 1;
-  const pageSize = Number(req.query.pageSize) || 20;
-  res.json(getEscalatedAfterSales(page, pageSize));
+router.get('/after-sales', requireAdmin(['CS_AGENT']), async (req, res, next) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const pageSize = Number(req.query.pageSize) || 20;
+    res.json(await getEscalatedAfterSales(page, pageSize));
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/merchants/pending', requireAdmin(['OPERATOR']), (_req, res) => {
-  res.json(getPendingMerchants());
+router.get('/merchants/pending', requireAdmin(['OPERATOR']), async (_req, res, next) => {
+  try {
+    res.json(await getPendingMerchants());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/merchants/applications', requireAdmin(['OPERATOR']), async (req, res, next) => {
+  try {
+    const status = req.query.status || undefined;
+    const page = Number(req.query.page) || 1;
+    const pageSize = Number(req.query.pageSize) || 20;
+    res.json(await getMerchantApplications({ status, page, pageSize }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/merchants/:merchantId/audit', requireAdmin(['OPERATOR']), async (req, res, next) => {
+  try {
+    const applicationId = Number(req.params.merchantId);
+    const { approved, reason } = req.body || {};
+    if (typeof approved !== 'boolean') return res.status(400).json({ message: 'approved 必填' });
+    const result = await auditMerchantApplication(applicationId, req.admin.id, approved, reason);
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'REASON_REQUIRED') return res.status(400).json({ message: result.message });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;

@@ -1,112 +1,57 @@
-# 后端 API
+# API 包
 
-组长主责。当前为 W1 内存 Mock 实现，对齐 `docs/api/openapi.yaml`。
+## 依赖
 
-## 启动
+- Node.js 18+
+- MySQL 8（推荐 Docker，见项目根目录 `docker-compose.yml`）
+
+## 首次启动
 
 ```bash
-cd packages/api
+# 1. 启动 MySQL
+docker compose up -d
+
+# 2. 配置环境变量
+cp .env.example .env
+
+# 3. 安装依赖并建表、种子数据
 npm install
-npm run dev   # Node 14+ 可用；改代码后需手动重启
+npm run db:setup
+
+# 4. 启动 API
+npm run dev
 ```
 
-> **Node 版本**：当前脚本兼容 **Node 14+**。若使用 Node 18+，可将 `dev` 改为 `node --watch src/index.js` 实现热重载。建议全组升级到 **Node 18 LTS**。
+API 地址：`http://localhost:8080/api`
 
-默认地址：`http://localhost:8080/api`
+## 数据库脚本
+
+| 命令 | 说明 |
+|------|------|
+| `npm run db:migrate` | 执行 `scripts/schema.sql` |
+| `npm run db:seed` | 执行 `scripts/seed.sql`（会重置演示数据） |
+| `npm run db:setup` | migrate + seed |
+
+## 已持久化（MySQL）
+
+- 管理员、商家、入驻申请、商品审核记录（Batch 1）
+- 用户、地址、购物车、订单、支付、售后（Batch 3）
+
+**仍在内存（重启丢失）：** SPU/SKU/库存、类目。见 [`docs/DB_MIGRATION.md`](../../docs/DB_MIGRATION.md)。
 
 ## 演示账号
 
-| 端 | 账号 | 密码 | 说明 |
-|----|------|------|------|
-| C 端用户 | 13800138000 | 123456 | userId=1，默认地址 id=1 |
-| 商家 | merchant1 | 123456 | merchantId=1，数码旗舰店 |
-| 商家 | merchant2 | 123456 | merchantId=2，家居生活馆 |
-| 平台 | operator | operator123 | OPERATOR（商品审核） |
-| 平台 | csagent | cs123 | CS_AGENT |
-
-## 认证
-
-- `POST /auth/user/login` — body: `{ "phone", "password" }` → `{ token, userId }`
-- `POST /auth/merchant/login` — body: `{ "username", "password" }` → `{ token, merchantId, shopId, shopName }`
-- `POST /auth/admin/login` — body: `{ "username", "password" }`
-
-后续订单/商家接口请在 Header 携带：`Authorization: Bearer TOKEN`
-
-## 订单接口（C 端，需用户 Token）
-
-| 方法 | 路径 | 说明 |
+| 角色 | 账号 | 密码 |
 |------|------|------|
-| POST | `/orders` | 创建订单。body: `{ addressId, items: [{ skuId, quantity }], remark? }`。锁定库存，按 merchantId 拆子单，状态 `PENDING_PAYMENT`，15 分钟支付超时 |
-| GET | `/orders` | 用户订单列表，可选 query `status` |
-| GET | `/orders/:id` | 订单详情（含 subOrders、addressSnapshot） |
-| POST | `/orders/:id/pay` | Mock 支付：`PENDING_PAYMENT` → `PENDING_SHIPMENT`，扣减锁定库存 |
-| POST | `/orders/:id/cancel` | 取消待支付订单，释放锁定库存 → `CANCELLED` |
+| C 端用户 | 13800138000 | 123456 |
+| 运营 | operator | operator123 |
+| 客服 | csagent | cs123 |
+| 商家 | merchant1 | 123456 |
 
-超时未支付订单在读写订单相关数据时会自动关闭（`expirePendingOrders`）。
+## 联调验证
 
-### 创建订单示例
-
-先 `POST /auth/user/login` 获取 token，再：
-
-`POST /orders` with body `{"addressId":1,"items":[{"skuId":1001,"quantity":1},{"skuId":1003,"quantity":1}]}`
-
-（SKU 1001 与 1003 分属两个商家，会生成两个 subOrder。）
-
-## 商家接口（需商家 Token）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/merchant/products` | 获取当前商家的商品列表，包含 SPU、SKU、Stock 信息 |
-| POST | `/merchant/products` | 创建商品草稿。body: `{ categoryId, title, description, mainImage, skus }`，初始状态 `DRAFT` |
-| POST | `/merchant/products/:spuId/submit-audit` | 提交商品审核，状态 `DRAFT` → `PENDING_AUDIT` |
-| GET | `/merchant/orders` | 获取当前商家的子订单列表，可选 query `status` |
-| POST | `/merchant/orders/:subOrderId/ship` | 商家发货。body: `{ logisticsCompany, trackingNo }`，子单 `PENDING_SHIPMENT` → `SHIPPED` |
-
-### 商家商品测试流程
-
-1. 调用 `POST /auth/merchant/login`，使用 `merchant1 / 123456` 获取 token。
-2. 后续商家接口 Header 携带：`Authorization: Bearer TOKEN`。
-3. 调用 `POST /merchant/products` 创建商品草稿，示例 body：
-
-```json
-{
-  "categoryId": 1,
-  "title": "测试商品",
-  "description": "测试商品描述",
-  "mainImage": "https://example.com/product.png",
-  "skus": [
-    {
-      "specJson": {
-        "color": "黑色"
-      },
-      "price": 299,
-      "stock": {
-        "available": 100
-      }
-    }
-  ]
-}
+```bash
+node ../../scripts/verify-merchant-onboarding.mjs
+node ../../scripts/verify-product-audit-history.mjs
+node ../../scripts/verify-db-persistence.mjs
 ```
-
-4. 调用 `GET /merchant/products` 查看商品，创建后状态为 `DRAFT`。
-5. 调用 `POST /merchant/products/:spuId/submit-audit` 提交审核，状态变为 `PENDING_AUDIT`。
-6. 商品审核由 Admin 端后续处理。
-
-### 商家订单测试流程
-
-1. 用户端先完成下单并调用 `POST /orders/:id/pay` 支付成功。
-2. 商家登录后调用 `GET /merchant/orders?status=PENDING_SHIPMENT` 查看待发货子订单。
-3. 调用 `POST /merchant/orders/:subOrderId/ship` 填写物流公司和运单号完成发货。
-
-## Admin 接口
-
-- `GET /admin/products/pending`
-- `GET /admin/products/:spuId`
-- `POST /admin/products/:spuId/audit` — `PENDING_AUDIT` → `ON_SHELF` | `REJECTED`
-
-## 业务规则
-
-- 库存：`stock.available` / `stock.locked`；下单锁定，支付扣减锁定，取消/超时释放
-- 仅 `ON_SHELF` SPU 可下单（演示数据：SPU 101、102 上架，103 待审核）
-- 订单项保存商品快照（title、price）
-- 仅 `OPERATOR` 可访问商品审核接口

@@ -11,7 +11,7 @@
 | 工作台待办数 | P1 | 展示待审商品数、待仲裁售后数 | 审核/售后 API 就绪 | ✅ |
 | 全平台订单查询 | P1 | 按订单号/用户/商家/状态筛选 | 订单数据已有 | ✅ |
 | 售后仲裁 | P1 | 处理 `ESCALATED` 工单，裁定同意/拒绝 | A 申请 + B 超时未审 | ⬜ |
-| 商家入驻审核 | P1 | 审核入驻申请（可简化表单） | B 提交入驻 | ⬜ |
+| 商家入驻审核 | P1 | 审核入驻申请（可简化表单） | B 提交入驻 | ✅ MySQL 持久化 |
 | 类目管理 | P2 | 维护类目树（时间不够可只读） | B 提供类目 API | ⬜ |
 
 ---
@@ -97,8 +97,8 @@ sequenceDiagram
 | 路由 | 页面 | 优先级 | 说明 |
 |------|------|--------|------|
 | `/login` | 登录 | P0 | 账号+密码，存 JWT |
-| `/audit/products` | 商品审核 | P0 | 表格+详情抽屉，通过/驳回 |
-| `/dashboard` | 工作台 | P1 | 待审商品数、待仲裁售后数 |
+| `/audit/products` | 商品审核 | P0 | Tab：待审核/已审核/全部记录；表格+详情抽屉 |
+| `/dashboard` | 工作台 | P1 | 统计卡片、快捷入口、待办预览（按角色） |
 | `/orders` | 订单查询 | P1 | 筛选+详情，只读 |
 | `/after-sales` | 售后仲裁 | P1 | 仅 ESCALATED 列表 |
 | `/audit/merchants` | 商家审核 | P1 | 入驻申请列表 |
@@ -115,8 +115,9 @@ sequenceDiagram
 | Method | Path | 角色 | 说明 |
 |--------|------|------|------|
 | POST | `/auth/admin/login` | — | 管理员登录 |
-| GET | `/admin/dashboard/summary` | OPERATOR, CS_AGENT | 工作台待办统计 |
+| GET | `/admin/dashboard/summary` | OPERATOR, CS_AGENT | 工作台统计 + 待办预览列表 |
 | GET | `/admin/products/pending` | OPERATOR | 待审核商品列表 |
+| GET | `/admin/products/audits` | OPERATOR | 商品审核历史记录 |
 | POST | `/admin/products/{spuId}/audit` | OPERATOR | 审核通过/驳回 |
 | GET | `/admin/orders` | OPERATOR, CS_AGENT | 全平台订单（筛选） |
 | GET | `/admin/orders/{orderId}` | OPERATOR, CS_AGENT | 订单详情 |

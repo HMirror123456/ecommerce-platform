@@ -16,13 +16,13 @@ export function signMerchantToken(merchant) {
 }
 
 export function requireAdmin(requiredRoles) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: '未登录' });
     try {
       const payload = jwt.verify(header.slice(7), JWT_SECRET);
       if (payload.type !== 'admin') return res.status(403).json({ message: '无权限' });
-      const admin = findAdminById(payload.sub);
+      const admin = await findAdminById(payload.sub);
       if (!admin) return res.status(401).json({ message: '账号无效' });
       if (requiredRoles?.length && !requiredRoles.includes(admin.role)) {
         return res.status(403).json({ message: '当前角色无此操作权限' });
@@ -36,31 +36,41 @@ export function requireAdmin(requiredRoles) {
 }
 
 export function requireUser(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: '未登录' });
-  try {
-    const payload = jwt.verify(header.slice(7), JWT_SECRET);
-    if (payload.type !== 'user') return res.status(403).json({ message: '无权限' });
-    const user = findUserById(payload.sub);
-    if (!user) return res.status(401).json({ message: '账号无效' });
-    req.user = user;
-    next();
-  } catch {
-    return res.status(401).json({ message: '登录已过期，请重新登录' });
-  }
+  (async () => {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: '未登录' });
+    try {
+      const payload = jwt.verify(header.slice(7), JWT_SECRET);
+      if (payload.type !== 'user') return res.status(403).json({ message: '无权限' });
+      const user = await findUserById(payload.sub);
+      if (!user) return res.status(401).json({ message: '账号无效' });
+      req.user = user;
+      next();
+    } catch (err) {
+      if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+        return res.status(401).json({ message: '登录已过期，请重新登录' });
+      }
+      next(err);
+    }
+  })();
 }
 
 export function requireMerchant(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: '未登录' });
-  try {
-    const payload = jwt.verify(header.slice(7), JWT_SECRET);
-    if (payload.type !== 'merchant') return res.status(403).json({ message: '无权限' });
-    const merchant = findMerchantById(payload.sub);
-    if (!merchant) return res.status(401).json({ message: '账号无效' });
-    req.merchant = merchant;
-    next();
-  } catch {
-    return res.status(401).json({ message: '登录已过期，请重新登录' });
-  }
+  (async () => {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: '未登录' });
+    try {
+      const payload = jwt.verify(header.slice(7), JWT_SECRET);
+      if (payload.type !== 'merchant') return res.status(403).json({ message: '无权限' });
+      const merchant = await findMerchantById(payload.sub);
+      if (!merchant) return res.status(401).json({ message: '账号无效' });
+      req.merchant = merchant;
+      next();
+    } catch (err) {
+      if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+        return res.status(401).json({ message: '登录已过期，请重新登录' });
+      }
+      next(err);
+    }
+  })();
 }
