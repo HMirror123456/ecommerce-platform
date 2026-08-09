@@ -158,6 +158,37 @@ export async function findPublicProductDetail(spuId) {
   return product ? serializePublicDetail(product) : null;
 }
 
+export async function findSkuSnapshot(skuId) {
+  const [rows] = await pool.query(
+    `SELECT
+       sku.sku_id, sku.spec_json, sku.price,
+       spu.spu_id, spu.merchant_id, spu.shop_name, spu.title, spu.main_image, spu.status
+     FROM skus sku
+     JOIN spus spu ON spu.spu_id = sku.spu_id
+     WHERE sku.sku_id = ?
+     LIMIT 1`,
+    [skuId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const stock = await stockRepo.getStock(skuId);
+  return {
+    skuId: row.sku_id,
+    spuId: row.spu_id,
+    merchantId: row.merchant_id,
+    shopName: row.shop_name,
+    title: row.title,
+    mainImage: row.main_image,
+    status: row.status,
+    specJson: parseJson(row.spec_json),
+    price: Number(row.price),
+    stock: {
+      available: stock?.available ?? 0,
+      locked: stock?.locked ?? 0,
+    },
+  };
+}
+
 export async function listByMerchant(merchantId) {
   const [rows] = await pool.query(
     `SELECT spu_id

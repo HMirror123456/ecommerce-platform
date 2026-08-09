@@ -1,7 +1,7 @@
 # MySQL 迁移分工（Batch 2 / 3）
 
 > **Batch 1 + 3 已落库**：`admins`, `merchants`, `merchant_applications`, `product_audits`, `users`, `addresses`, `cart_items`, `orders`, `sub_orders`, `order_items`, `payments`, `after_sales`  
-> **Batch 2 仍在内存**：`categories`, `spus`（含 SKU/库存），见 [`store.js`](../packages/api/src/data/store.js)。
+> **Batch 2 已落库**：`categories`, `spus`, `skus`, `stocks`；商品查询、商家商品管理、商品审核流程、基础库存能力已切换 MySQL。
 
 ## 三人共享同一数据库
 
@@ -23,7 +23,7 @@ DB_NAME=ecommerce
 | 批次 | 负责人 | 表 | 状态 |
 |------|--------|-----|------|
 | **1** | 组长 | `admins`, `merchants`, `merchant_applications`, `product_audits` | ✅ 已接 MySQL |
-| **2** | B | `categories`, `spus`, `skus`, `stocks` | 内存（`categories`, `spus`） |
+| **2** | B | `categories`, `spus`, `skus`, `stocks` | ✅ 已接 MySQL |
 | **3a** | A | `users`, `addresses`, `cart_items` | ✅ 已接 MySQL |
 | **3b** | 组长 | `orders`, `order_items`, `sub_orders`, `payments`, `after_sales` | ✅ 已接 MySQL |
 
@@ -35,6 +35,7 @@ DB_NAME=ecommerce
 4. 路由 handler 加 `async/await`
 5. 在 [`scripts/seed.sql`](../scripts/seed.sql) 补充演示数据
 6. 更新 [`openapi.yaml`](../docs/api/openapi.yaml)（若字段有变）
+
 
 ## 库存并发（Batch 2 必做）
 

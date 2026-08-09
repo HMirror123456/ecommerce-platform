@@ -10,8 +10,28 @@ function mapStockRow(row) {
   };
 }
 
-export async function getStock(skuId) {
-  const [rows] = await pool.query(
+function isDbClient(value) {
+  return value && typeof value.query === 'function';
+}
+
+function resolveDbAndArgs(args) {
+  if (isDbClient(args[0])) {
+    return {
+      db: args[0],
+      skuId: args[1],
+      quantity: args[2],
+    };
+  }
+  return {
+    db: pool,
+    skuId: args[0],
+    quantity: args[1],
+  };
+}
+
+export async function getStock(...args) {
+  const { db, skuId } = resolveDbAndArgs(args);
+  const [rows] = await db.query(
     `SELECT sku_id, available, locked, updated_at
      FROM stocks
      WHERE sku_id = ?
@@ -42,59 +62,62 @@ export async function createStock(conn, { skuId, available, locked = 0, updatedA
   );
 }
 
-export async function lockStock(skuId, quantity) {
+export async function lockStock(...args) {
+  const { db, skuId, quantity } = resolveDbAndArgs(args);
   const qty = Number(quantity);
   if (!Number.isInteger(qty) || qty <= 0) {
     return { error: 'INVALID_QTY', message: '数量无效' };
   }
-  const [result] = await pool.query(
+  const [result] = await db.query(
     `UPDATE stocks
      SET available = available - ?, locked = locked + ?, updated_at = NOW(3)
      WHERE sku_id = ? AND available >= ?`,
     [qty, qty, skuId, qty],
   );
   if (result.affectedRows === 0) {
-    const stock = await getStock(skuId);
+    const stock = await getStock(db, skuId);
     if (!stock) return { error: 'SKU_NOT_FOUND', message: 'SKU 不存在' };
     return { error: 'INSUFFICIENT_STOCK', message: '库存不足' };
   }
-  return { ok: true, stock: await getStock(skuId) };
+  return { ok: true, stock: await getStock(db, skuId) };
 }
 
-export async function releaseStock(skuId, quantity) {
+export async function releaseStock(...args) {
+  const { db, skuId, quantity } = resolveDbAndArgs(args);
   const qty = Number(quantity);
   if (!Number.isInteger(qty) || qty <= 0) {
     return { error: 'INVALID_QTY', message: '数量无效' };
   }
-  const [result] = await pool.query(
+  const [result] = await db.query(
     `UPDATE stocks
      SET available = available + ?, locked = locked - ?, updated_at = NOW(3)
      WHERE sku_id = ? AND locked >= ?`,
     [qty, qty, skuId, qty],
   );
   if (result.affectedRows === 0) {
-    const stock = await getStock(skuId);
+    const stock = await getStock(db, skuId);
     if (!stock) return { error: 'SKU_NOT_FOUND', message: 'SKU 不存在' };
     return { error: 'INSUFFICIENT_LOCKED_STOCK', message: '锁定库存不足' };
   }
-  return { ok: true, stock: await getStock(skuId) };
+  return { ok: true, stock: await getStock(db, skuId) };
 }
 
-export async function deductStock(skuId, quantity) {
+export async function deductStock(...args) {
+  const { db, skuId, quantity } = resolveDbAndArgs(args);
   const qty = Number(quantity);
   if (!Number.isInteger(qty) || qty <= 0) {
     return { error: 'INVALID_QTY', message: '数量无效' };
   }
-  const [result] = await pool.query(
+  const [result] = await db.query(
     `UPDATE stocks
      SET locked = locked - ?, updated_at = NOW(3)
      WHERE sku_id = ? AND locked >= ?`,
     [qty, skuId, qty],
   );
   if (result.affectedRows === 0) {
-    const stock = await getStock(skuId);
+    const stock = await getStock(db, skuId);
     if (!stock) return { error: 'SKU_NOT_FOUND', message: 'SKU 不存在' };
     return { error: 'INSUFFICIENT_LOCKED_STOCK', message: '锁定库存不足' };
   }
-  return { ok: true, stock: await getStock(skuId) };
+  return { ok: true, stock: await getStock(db, skuId) };
 }

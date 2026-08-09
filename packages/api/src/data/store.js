@@ -9,6 +9,7 @@ import * as orderRepo from '../repositories/orderRepo.js';
 import * as afterSaleRepo from '../repositories/afterSaleRepo.js';
 import * as categoryRepo from '../repositories/categoryRepo.js';
 import * as productRepo from '../repositories/productRepo.js';
+import * as stockRepo from '../repositories/stockRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -280,7 +281,7 @@ export async function expirePendingOrders() {
   const expired = await orderRepo.listExpiredPendingOrders();
   for (const order of expired) {
     for (const item of order.items) {
-      releaseStock(item.skuId, item.quantity);
+      await stockRepo.releaseStock(item.skuId, item.quantity);
     }
     const now = new Date().toISOString();
     await orderRepo.updateOrder(order.orderId, {
@@ -374,24 +375,22 @@ export async function setDefaultAddress(userId, addressId) {
   return userRepo.setDefaultAddress(userId, addressId);
 }
 
-function buildCartSkuSnapshot(skuId) {
-  const found = findSkuById(skuId);
-  if (!found) return null;
-  const { spu, sku } = found;
-  if (spu.status !== 'ON_SHELF') return null;
+async function buildCartSkuSnapshot(skuId) {
+  const snapshot = await productRepo.findSkuSnapshot(skuId);
+  if (!snapshot || snapshot.status !== 'ON_SHELF') return null;
   return {
-    skuId: sku.skuId,
-    specJson: sku.specJson,
-    price: sku.price,
-    stock: sku.stock?.available ?? 0,
-    title: spu.title,
-    mainImage: spu.mainImage,
-    shopName: spu.shopName,
+    skuId: snapshot.skuId,
+    specJson: snapshot.specJson,
+    price: snapshot.price,
+    stock: snapshot.stock.available,
+    title: snapshot.title,
+    mainImage: snapshot.mainImage,
+    shopName: snapshot.shopName,
   };
 }
 
-function serializeCartItem(item) {
-  const sku = buildCartSkuSnapshot(item.skuId);
+async function serializeCartItem(item) {
+  const sku = await buildCartSkuSnapshot(item.skuId);
   return {
     itemId: item.itemId,
     skuId: item.skuId,
@@ -411,16 +410,16 @@ function serializeCartItem(item) {
 export async function getCartItems(userId) {
   await expirePendingOrders();
   const items = await userRepo.listCartItems(userId);
-  return items.map(serializeCartItem);
+  return Promise.all(items.map(serializeCartItem));
 }
 
 export async function addCartItem(userId, skuId, quantity) {
   await expirePendingOrders();
   const qty = Number(quantity);
-  if (!skuId || !Number.isInteger(qty) || qty < 1) {
+  if (!Number.isInteger(skuId) || skuId <= 0 || !Number.isInteger(qty) || qty < 1) {
     return { error: 'INVALID_INPUT', message: '商品或数量无效' };
   }
-  const snapshot = buildCartSkuSnapshot(skuId);
+  const snapshot = await buildCartSkuSnapshot(skuId);
   if (!snapshot) return { error: 'PRODUCT_NOT_ON_SHELF', message: '商品未上架或不存在' };
   if (snapshot.stock < qty) return { error: 'INSUFFICIENT_STOCK', message: '库存不足' };
 
@@ -433,7 +432,7 @@ export async function addCartItem(userId, skuId, quantity) {
   } else {
     item = await userRepo.insertCartItem(userId, skuId, qty);
   }
-  return { item: serializeCartItem(item) };
+  return { item: await serializeCartItem(item) };
 }
 
 export async function updateCartItem(userId, itemId, quantity) {
@@ -444,12 +443,12 @@ export async function updateCartItem(userId, itemId, quantity) {
   if (!Number.isInteger(qty) || qty < 1) {
     return { error: 'INVALID_INPUT', message: '数量无效' };
   }
-  const snapshot = buildCartSkuSnapshot(item.skuId);
+  const snapshot = await buildCartSkuSnapshot(item.skuId);
   if (!snapshot) return { error: 'PRODUCT_NOT_ON_SHELF', message: '商品已下架' };
   if (snapshot.stock < qty) return { error: 'INSUFFICIENT_STOCK', message: '库存不足' };
   await userRepo.updateCartItemQuantity(itemId, qty);
   item.quantity = qty;
-  return { item: serializeCartItem(item) };
+  return { item: await serializeCartItem(item) };
 }
 
 export async function deleteCartItem(userId, itemId) {
@@ -665,33 +664,32 @@ export async function createOrder(userId, { addressId, items, remark }) {
   for (const raw of items) {
     const skuId = Number(raw.skuId);
     const quantity = Number(raw.quantity);
-    if (!skuId || !quantity || quantity < 1) {
-      for (const l of locked) releaseStock(l.skuId, l.quantity);
+    if (!Number.isInteger(skuId) || !Number.isInteger(quantity) || skuId <= 0 || quantity < 1) {
+      for (const l of locked) await stockRepo.releaseStock(l.skuId, l.quantity);
       return { error: 'INVALID_ITEM', message: '商品项无效' };
     }
-    const found = findSkuById(skuId);
-    if (!found) {
-      for (const l of locked) releaseStock(l.skuId, l.quantity);
+    const snapshot = await productRepo.findSkuSnapshot(skuId);
+    if (!snapshot) {
+      for (const l of locked) await stockRepo.releaseStock(l.skuId, l.quantity);
       return { error: 'SKU_NOT_FOUND', message: 'SKU 不存在' };
     }
-    const { spu, sku } = found;
-    if (spu.status !== 'ON_SHELF') {
-      for (const l of locked) releaseStock(l.skuId, l.quantity);
+    if (snapshot.status !== 'ON_SHELF') {
+      for (const l of locked) await stockRepo.releaseStock(l.skuId, l.quantity);
       return { error: 'PRODUCT_NOT_ON_SHELF', message: '商品未上架' };
     }
-    const lockResult = lockStock(skuId, quantity);
+    const lockResult = await stockRepo.lockStock(skuId, quantity);
     if (lockResult.error) {
-      for (const l of locked) releaseStock(l.skuId, l.quantity);
+      for (const l of locked) await stockRepo.releaseStock(l.skuId, l.quantity);
       return lockResult;
     }
     locked.push({ skuId, quantity });
     lineItems.push({
       skuId,
-      spuId: spu.spuId,
-      merchantId: spu.merchantId,
-      shopName: spu.shopName,
-      title: spu.title,
-      price: sku.price,
+      spuId: snapshot.spuId,
+      merchantId: snapshot.merchantId,
+      shopName: snapshot.shopName,
+      title: snapshot.title,
+      price: snapshot.price,
       quantity,
     });
   }
@@ -718,18 +716,24 @@ export async function createOrder(userId, { addressId, items, remark }) {
     });
   }
 
-  const order = await orderRepo.createOrderRecord({
-    userId,
-    status: 'PENDING_PAYMENT',
-    totalAmount,
-    remark: remark || null,
-    addressId,
-    addressSnapshot: formatAddressSnapshot(address),
-    createdAt: now,
-    paymentDeadline,
-    lineItems,
-    subOrderGroups: [...byMerchant.values()],
-  });
+  let order;
+  try {
+    order = await orderRepo.createOrderRecord({
+      userId,
+      status: 'PENDING_PAYMENT',
+      totalAmount,
+      remark: remark || null,
+      addressId,
+      addressSnapshot: formatAddressSnapshot(address),
+      createdAt: now,
+      paymentDeadline,
+      lineItems,
+      subOrderGroups: [...byMerchant.values()],
+    });
+  } catch (err) {
+    for (const l of locked) await stockRepo.releaseStock(l.skuId, l.quantity);
+    throw err;
+  }
 
   return { order: serializeOrder(order, { includeSubOrders: true }) };
 }
@@ -780,7 +784,7 @@ export async function payOrder(userId, orderId) {
     return { error: 'INVALID_STATE', message: '订单状态不允许支付' };
   }
   if (new Date(order.paymentDeadline).getTime() < Date.now()) {
-    for (const item of order.items) releaseStock(item.skuId, item.quantity);
+    for (const item of order.items) await stockRepo.releaseStock(item.skuId, item.quantity);
     const now = new Date().toISOString();
     await orderRepo.updateOrder(order.orderId, {
       status: 'CANCELLED',
@@ -792,7 +796,7 @@ export async function payOrder(userId, orderId) {
   }
 
   for (const item of order.items) {
-    const r = deductStock(item.skuId, item.quantity);
+    const r = await stockRepo.deductStock(item.skuId, item.quantity);
     if (r.error) return r;
   }
 
@@ -823,7 +827,7 @@ export async function cancelOrder(userId, orderId) {
   if (order.status !== 'PENDING_PAYMENT') {
     return { error: 'INVALID_STATE', message: '仅待支付订单可取消' };
   }
-  for (const item of order.items) releaseStock(item.skuId, item.quantity);
+  for (const item of order.items) await stockRepo.releaseStock(item.skuId, item.quantity);
   const now = new Date().toISOString();
   await orderRepo.updateOrder(order.orderId, {
     status: 'CANCELLED',
