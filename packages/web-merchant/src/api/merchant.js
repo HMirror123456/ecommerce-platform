@@ -32,12 +32,24 @@ export function fetchMerchantProducts() {
   return client.get('/merchant/products').then((r) => r.data);
 }
 
+export function fetchMerchantProduct(spuId) {
+  return client.get(`/merchant/products/${spuId}`).then((r) => r.data);
+}
+
 export function createMerchantProduct(payload) {
   return client.post('/merchant/products', payload).then((r) => r.data);
 }
 
+export function updateMerchantProduct(spuId, payload) {
+  return client.put(`/merchant/products/${spuId}`, payload).then((r) => r.data);
+}
+
 export function submitMerchantProductAudit(spuId) {
   return client.post(`/merchant/products/${spuId}/submit-audit`).then((r) => r.data);
+}
+
+export function offShelfMerchantProduct(spuId) {
+  return client.post(`/merchant/products/${spuId}/off-shelf`).then((r) => r.data);
 }
 
 export function getAfterSales(params) {

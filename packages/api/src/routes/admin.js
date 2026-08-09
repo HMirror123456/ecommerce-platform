@@ -25,10 +25,14 @@ router.get('/dashboard/summary', requireAdmin(adminRoles), async (_req, res, nex
   }
 });
 
-router.get('/products/pending', requireAdmin(['OPERATOR']), (req, res) => {
-  const page = Number(req.query.page) || 1;
-  const pageSize = Number(req.query.pageSize) || 20;
-  res.json(getPendingProducts(page, pageSize));
+router.get('/products/pending', requireAdmin(['OPERATOR']), async (req, res, next) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const pageSize = Number(req.query.pageSize) || 20;
+    res.json(await getPendingProducts(page, pageSize));
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.get('/products/audits', requireAdmin(['OPERATOR']), async (req, res, next) => {
@@ -45,10 +49,14 @@ router.get('/products/audits', requireAdmin(['OPERATOR']), async (req, res, next
   }
 });
 
-router.get('/products/:spuId', requireAdmin(['OPERATOR']), (req, res) => {
-  const product = getAdminProductDetail(Number(req.params.spuId));
+router.get('/products/:spuId', requireAdmin(['OPERATOR']), async (req, res, next) => {
+  try {
+  const product = await getAdminProductDetail(Number(req.params.spuId));
   if (!product) return res.status(404).json({ message: '商品不存在' });
   res.json(product);
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.post('/products/:spuId/audit', requireAdmin(['OPERATOR']), async (req, res, next) => {

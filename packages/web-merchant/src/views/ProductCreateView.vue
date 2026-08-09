@@ -1,12 +1,21 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { useRouter } from 'vue-router';
-import { createMerchantProduct, fetchCategories } from '@/api/merchant';
+import { useRoute, useRouter } from 'vue-router';
+import {
+  createMerchantProduct,
+  fetchCategories,
+  fetchMerchantProduct,
+  updateMerchantProduct,
+} from '@/api/merchant';
 
 const router = useRouter();
+const route = useRoute();
+const isEdit = computed(() => route.name === 'product-edit');
+const spuId = computed(() => Number(route.params.spuId));
 const formRef = ref(null);
 const submitting = ref(false);
+const detailLoading = ref(false);
 const categoryLoading = ref(false);
 const categories = ref([]);
 const categoryProps = {
@@ -18,6 +27,7 @@ const categoryProps = {
 
 function createSku() {
   return {
+    skuId: null,
     specName: '',
     specValue: '',
     price: null,
@@ -118,11 +128,46 @@ async function loadCategories() {
   }
 }
 
+function getFirstSpecEntry(specJson) {
+  const entries = Object.entries(specJson || {});
+  return entries[0] || ['', ''];
+}
+
+async function loadProductDetail() {
+  if (!isEdit.value || !Number.isInteger(spuId.value)) return;
+  detailLoading.value = true;
+  try {
+    const data = await fetchMerchantProduct(spuId.value);
+    form.value.categoryId = data.categoryId;
+    form.value.title = data.title || '';
+    form.value.description = data.description || '';
+    form.value.mainImage = data.mainImage || '';
+    form.value.skus = (Array.isArray(data.skus) ? data.skus : []).map((sku) => {
+      const [specName, specValue] = getFirstSpecEntry(sku.specJson);
+      return {
+        skuId: sku.skuId,
+        specName,
+        specValue,
+        price: sku.price,
+        available: sku.stock?.available ?? 0,
+      };
+    });
+    if (!form.value.skus.length) form.value.skus = [createSku()];
+  } catch (e) {
+    ElMessage.error(e.message || '加载商品详情失败');
+    router.push({ name: 'products' });
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
 function addSku() {
+  if (isEdit.value) return;
   form.value.skus.push(createSku());
 }
 
 function removeSku(index) {
+  if (isEdit.value) return;
   if (form.value.skus.length <= 1) {
     ElMessage.warning('至少保留一个 SKU');
     return;
@@ -136,15 +181,22 @@ function buildPayload() {
     title: form.value.title.trim(),
     description: form.value.description.trim(),
     mainImage: form.value.mainImage.trim(),
-    skus: form.value.skus.map((sku) => ({
-      specJson: {
-        [sku.specName.trim()]: sku.specValue.trim(),
-      },
-      price: Number(sku.price),
-      stock: {
-        available: Number(sku.available),
-      },
-    })),
+    skus: form.value.skus.map((sku) => {
+      const item = {
+        specJson: {
+          [sku.specName.trim()]: sku.specValue.trim(),
+        },
+        price: Number(sku.price),
+      };
+      if (isEdit.value) {
+        item.skuId = Number(sku.skuId);
+      } else {
+        item.stock = {
+          available: Number(sku.available),
+        };
+      }
+      return item;
+    }),
   };
 }
 
@@ -165,17 +217,25 @@ async function submitProduct() {
 
   submitting.value = true;
   try {
-    await createMerchantProduct(buildPayload());
-    ElMessage.success('商品创建成功');
+    if (isEdit.value) {
+      await updateMerchantProduct(spuId.value, buildPayload());
+      ElMessage.success('商品保存成功');
+    } else {
+      await createMerchantProduct(buildPayload());
+      ElMessage.success('商品创建成功');
+    }
     router.push({ name: 'products' });
   } catch (e) {
-    ElMessage.error(e.message || '商品创建失败');
+    ElMessage.error(e.message || (isEdit.value ? '商品保存失败' : '商品创建失败'));
   } finally {
     submitting.value = false;
   }
 }
 
-onMounted(loadCategories);
+onMounted(async () => {
+  await loadCategories();
+  await loadProductDetail();
+});
 </script>
 
 <template>
@@ -183,14 +243,23 @@ onMounted(loadCategories);
     <template #header>
       <div class="card-header">
         <div>
-          <div class="title">发布商品</div>
-          <div class="description">填写 SPU 基础信息，并维护至少一个 SKU 与库存</div>
+          <div class="title">{{ isEdit ? '编辑商品' : '发布商品' }}</div>
+          <div class="description">
+            {{ isEdit ? '维护 SPU 基础信息与 SKU 价格、规格' : '填写 SPU 基础信息，并维护至少一个 SKU 与库存' }}
+          </div>
         </div>
         <el-button @click="router.push({ name: 'products' })">返回列表</el-button>
       </div>
     </template>
 
-    <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="product-form">
+    <el-form
+      ref="formRef"
+      v-loading="detailLoading"
+      :model="form"
+      :rules="rules"
+      label-position="top"
+      class="product-form"
+    >
       <el-row :gutter="16">
         <el-col :xs="24" :sm="12">
           <el-form-item label="商品分类" prop="categoryId">
@@ -223,13 +292,21 @@ onMounted(loadCategories);
 
       <div class="section-header">
         <span>SKU列表</span>
-        <el-button @click="addSku">新增 SKU</el-button>
+        <el-button v-if="!isEdit" @click="addSku">新增 SKU</el-button>
       </div>
 
       <div v-for="(sku, index) in form.skus" :key="index" class="sku-row">
         <div class="sku-title">
           <span>SKU {{ index + 1 }}</span>
-          <el-button link type="danger" :disabled="form.skus.length <= 1" @click="removeSku(index)">删除</el-button>
+          <el-button
+            v-if="!isEdit"
+            link
+            type="danger"
+            :disabled="form.skus.length <= 1"
+            @click="removeSku(index)"
+          >
+            删除
+          </el-button>
         </div>
         <el-row :gutter="16">
           <el-col :xs="24" :sm="6">
@@ -259,9 +336,16 @@ onMounted(loadCategories);
             <el-form-item
               label="可用库存"
               :prop="getSkuField(index, 'available')"
-              :rules="skuAvailableRules"
+              :rules="isEdit ? [] : skuAvailableRules"
             >
-              <el-input-number v-model="sku.available" :min="0" :precision="0" controls-position="right" class="full-width" />
+              <el-input-number
+                v-model="sku.available"
+                :min="0"
+                :precision="0"
+                :disabled="isEdit"
+                controls-position="right"
+                class="full-width"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -269,7 +353,9 @@ onMounted(loadCategories);
 
       <div class="actions">
         <el-button @click="router.push({ name: 'products' })">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitProduct">创建商品</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitProduct">
+          {{ isEdit ? '保存商品' : '创建商品' }}
+        </el-button>
       </div>
     </el-form>
   </el-card>

@@ -9,6 +9,10 @@ DELETE FROM cart_items;
 DELETE FROM addresses;
 DELETE FROM users;
 DELETE FROM product_audits;
+DELETE FROM stocks;
+DELETE FROM skus;
+DELETE FROM spus;
+DELETE FROM categories;
 DELETE FROM merchant_applications;
 DELETE FROM merchants;
 DELETE FROM admins;
@@ -24,6 +28,9 @@ ALTER TABLE after_sales AUTO_INCREMENT = 1;
 ALTER TABLE merchants AUTO_INCREMENT = 1;
 ALTER TABLE merchant_applications AUTO_INCREMENT = 101;
 ALTER TABLE product_audits AUTO_INCREMENT = 1;
+ALTER TABLE categories AUTO_INCREMENT = 1;
+ALTER TABLE spus AUTO_INCREMENT = 1;
+ALTER TABLE skus AUTO_INCREMENT = 1;
 ALTER TABLE admins AUTO_INCREMENT = 1;
 
 INSERT INTO admins (username, password, role) VALUES
@@ -36,6 +43,51 @@ INSERT INTO merchants (id, username, password, shop_id, shop_name) VALUES
 
 INSERT INTO merchant_applications (id, shop_name, contact_name, contact_phone, status, applied_at) VALUES
   (101, '新锐数码店', '李四', '13900139000', 'PENDING', '2026-08-06 06:00:00.000');
+
+INSERT INTO categories (id, parent_id, name, sort_order, enabled, created_at, updated_at) VALUES
+  (1, NULL, '数码', 1, 1, '2026-08-04 00:00:00.000', '2026-08-04 00:00:00.000'),
+  (11, 1, '耳机', 1, 1, '2026-08-04 00:00:00.000', '2026-08-04 00:00:00.000'),
+  (12, 1, '电脑外设', 2, 1, '2026-08-04 00:00:00.000', '2026-08-04 00:00:00.000'),
+  (2, NULL, '家居生活', 2, 1, '2026-08-04 00:00:00.000', '2026-08-04 00:00:00.000'),
+  (21, 2, '照明', 1, 1, '2026-08-04 00:00:00.000', '2026-08-04 00:00:00.000');
+
+INSERT INTO spus (
+  spu_id, shop_id, shop_name, merchant_id, category_id, title, description, main_image,
+  status, submitted_at, reject_reason, created_at, updated_at
+) VALUES
+  (
+    101, 1, '数码旗舰店', 1, 11, '无线蓝牙耳机 Pro',
+    '主动降噪，续航 30 小时',
+    'https://picsum.photos/seed/spu101/200/200',
+    'ON_SHELF', '2026-08-04 08:30:00.000', NULL,
+    '2026-08-04 08:30:00.000', '2026-08-04 08:30:00.000'
+  ),
+  (
+    102, 2, '家居生活馆', 2, 21, '北欧简约台灯',
+    '三档调光，护眼设计',
+    'https://picsum.photos/seed/spu102/200/200',
+    'ON_SHELF', '2026-08-04 09:15:00.000', NULL,
+    '2026-08-04 09:15:00.000', '2026-08-04 09:15:00.000'
+  ),
+  (
+    103, 1, '数码旗舰店', 1, 12, '机械键盘 87 键',
+    '青轴，RGB 背光',
+    'https://picsum.photos/seed/spu103/200/200',
+    'PENDING_AUDIT', '2026-08-04 10:00:00.000', NULL,
+    '2026-08-04 10:00:00.000', '2026-08-04 10:00:00.000'
+  );
+
+INSERT INTO skus (sku_id, spu_id, spec_json, price, created_at, updated_at) VALUES
+  (1001, 101, '{"color":"黑色"}', 299.00, '2026-08-04 08:30:00.000', '2026-08-04 08:30:00.000'),
+  (1002, 101, '{"color":"白色"}', 299.00, '2026-08-04 08:30:00.000', '2026-08-04 08:30:00.000'),
+  (1003, 102, '{"color":"原木色"}', 159.00, '2026-08-04 09:15:00.000', '2026-08-04 09:15:00.000'),
+  (1004, 103, '{"switch":"青轴"}', 449.00, '2026-08-04 10:00:00.000', '2026-08-04 10:00:00.000');
+
+INSERT INTO stocks (sku_id, available, locked, updated_at) VALUES
+  (1001, 120, 0, '2026-08-04 08:30:00.000'),
+  (1002, 80, 0, '2026-08-04 08:30:00.000'),
+  (1003, 50, 0, '2026-08-04 09:15:00.000'),
+  (1004, 30, 0, '2026-08-04 10:00:00.000');
 
 INSERT INTO users (id, phone, password, nickname) VALUES
   (1, '13800138000', '123456', '演示用户');

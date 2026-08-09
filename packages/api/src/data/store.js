@@ -7,6 +7,8 @@ import * as productAuditRepo from '../repositories/productAuditRepo.js';
 import * as userRepo from '../repositories/userRepo.js';
 import * as orderRepo from '../repositories/orderRepo.js';
 import * as afterSaleRepo from '../repositories/afterSaleRepo.js';
+import * as categoryRepo from '../repositories/categoryRepo.js';
+import * as productRepo from '../repositories/productRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -228,6 +230,47 @@ function validateCreateMerchantProductInput(payload) {
     const available = Number(sku.stock?.available);
     if (!Number.isInteger(available) || available < 0) {
       return { error: 'INVALID_INPUT', message: 'Stock available is invalid' };
+    }
+  }
+  return { ok: true };
+}
+
+function validateUpdateMerchantProductInput(payload) {
+  if (payload?.categoryId == null || payload.categoryId === '') {
+    return { error: 'INVALID_INPUT', message: 'Category is required' };
+  }
+  const categoryId = Number(payload?.categoryId);
+  if (!Number.isInteger(categoryId)) {
+    return { error: 'INVALID_INPUT', message: 'Category is required' };
+  }
+  if (!payload?.title?.trim()) {
+    return { error: 'INVALID_INPUT', message: 'Product title is required' };
+  }
+  if (!payload?.description?.trim()) {
+    return { error: 'INVALID_INPUT', message: 'Product description is required' };
+  }
+  if (!payload?.mainImage?.trim()) {
+    return { error: 'INVALID_INPUT', message: 'Product main image is required' };
+  }
+  if (!Array.isArray(payload?.skus) || payload.skus.length === 0) {
+    return { error: 'INVALID_INPUT', message: 'At least one SKU is required' };
+  }
+  const skuIds = new Set();
+  for (const sku of payload.skus) {
+    const skuId = Number(sku.skuId);
+    if (!Number.isInteger(skuId) || skuId <= 0 || skuIds.has(skuId)) {
+      return { error: 'INVALID_INPUT', message: 'SKU id is invalid' };
+    }
+    skuIds.add(skuId);
+    if (!isPlainObject(sku.specJson) || Object.keys(sku.specJson).length === 0) {
+      return { error: 'INVALID_INPUT', message: 'SKU spec is required' };
+    }
+    if (sku.price == null || sku.price === '') {
+      return { error: 'INVALID_INPUT', message: 'SKU price is invalid' };
+    }
+    const price = Number(sku.price);
+    if (!Number.isFinite(price) || price < 0) {
+      return { error: 'INVALID_INPUT', message: 'SKU price is invalid' };
     }
   }
   return { ok: true };
@@ -457,45 +500,14 @@ export function deductStock(skuId, quantity) {
   return { ok: true };
 }
 
-export function getPendingProducts(page = 1, pageSize = 20) {
-  expirePendingOrders();
-  const list = spus.filter((s) => s.status === 'PENDING_AUDIT');
-  const start = (page - 1) * pageSize;
-  return {
-    total: list.length,
-    list: list.slice(start, start + pageSize).map((s) => ({
-      spuId: s.spuId,
-      title: s.title,
-      shopName: s.shopName,
-      merchantId: s.merchantId,
-      mainImage: s.mainImage,
-      submittedAt: s.submittedAt,
-    })),
-  };
+export async function getPendingProducts(page = 1, pageSize = 20) {
+  await expirePendingOrders();
+  return productRepo.listPendingProducts(page, pageSize);
 }
 
 export async function getProductAuditHistory({ approved, page = 1, pageSize = 20 } = {}) {
-  expirePendingOrders();
-  const { total, list } = await productAuditRepo.listAudits({ approved, page, pageSize });
-  return {
-    total,
-    list: list.map((audit) => {
-      const spu = getSpuById(audit.spuId);
-      return {
-        auditId: audit.id,
-        spuId: audit.spuId,
-        approved: audit.approved,
-        reason: audit.reason || undefined,
-        auditedAt: audit.auditedAt,
-        adminId: audit.adminId,
-        title: spu?.title || '(商品不存在)',
-        shopName: spu?.shopName,
-        merchantId: spu?.merchantId,
-        mainImage: spu?.mainImage,
-        status: spu?.status,
-      };
-    }),
-  };
+  await expirePendingOrders();
+  return productRepo.listAuditHistory({ approved, page, pageSize });
 }
 
 export function getSpuById(spuId) {
@@ -503,49 +515,43 @@ export function getSpuById(spuId) {
   return spus.find((s) => s.spuId === spuId);
 }
 
-export function getAdminProductDetail(spuId) {
-  const spu = getSpuById(spuId);
-  if (!spu) return null;
-  return serializeMerchantProduct(spu);
+export async function getAdminProductDetail(spuId) {
+  await expirePendingOrders();
+  return productRepo.findById(spuId);
 }
 
-export function getPublicProducts(page = 1, pageSize = 20, categoryId) {
-  expirePendingOrders();
-  let list = spus.filter((s) => s.status === 'ON_SHELF');
+export async function getPublicProducts(page = 1, pageSize = 20, categoryId) {
+  await expirePendingOrders();
+  let categoryIds;
   if (categoryId != null && categoryId !== '') {
-    const categoryIds = getCategoryFilterIds(categoryId);
-    if (categoryIds) list = list.filter((s) => categoryIds.includes(s.categoryId));
+    categoryIds = await categoryRepo.getCategoryFilterIds(categoryId);
   }
-  const start = (page - 1) * pageSize;
-  return {
-    total: list.length,
-    list: list.slice(start, start + pageSize).map(serializePublicProductSummary),
-  };
+  return productRepo.listPublicProducts({ page, pageSize, categoryIds });
 }
 
-export function getCategories() {
-  return categories;
+export async function getCategories() {
+  return categoryRepo.listTree();
 }
 
-export function getPublicProductDetail(spuId) {
-  const spu = getSpuById(spuId);
-  if (!spu || spu.status !== 'ON_SHELF') return null;
-  return serializePublicProductDetail(spu);
+export async function getPublicProductDetail(spuId) {
+  await expirePendingOrders();
+  return productRepo.findPublicProductDetail(spuId);
 }
 
-export function getMerchantProducts(merchant) {
-  expirePendingOrders();
-  const list = spus.filter((spu) => ownsSpu(merchant, spu)).map((spu) => serializeMerchantProduct(spu));
-  return { total: list.length, list };
+export async function getMerchantProducts(merchant) {
+  await expirePendingOrders();
+  return productRepo.listByMerchant(merchant.id);
+}
+
+export async function getMerchantProductDetail(merchant, spuId) {
+  await expirePendingOrders();
+  return productRepo.findByMerchant(merchant.id, spuId);
 }
 
 export async function getMerchantDashboardSummary(merchant) {
   await expirePendingOrders();
-  const merchantProducts = spus.filter((spu) => ownsSpu(merchant, spu));
-  const productCountByStatus = merchantProducts.reduce((countMap, spu) => {
-    countMap[spu.status] = (countMap[spu.status] || 0) + 1;
-    return countMap;
-  }, {});
+  const productStats = await productRepo.countByMerchantStatus(merchant.id);
+  const productCountByStatus = productStats.counts;
 
   const pendingShipmentOrderCount = await orderRepo.countSubOrdersByMerchant(
     merchant.id,
@@ -557,7 +563,7 @@ export async function getMerchantDashboardSummary(merchant) {
     merchantId: merchant.id,
     shopId: merchant.shopId,
     shopName: merchant.shopName,
-    productTotal: merchantProducts.length,
+    productTotal: productStats.total,
     draftProductCount: productCountByStatus.DRAFT || 0,
     pendingAuditProductCount: productCountByStatus.PENDING_AUDIT || 0,
     onShelfProductCount: productCountByStatus.ON_SHELF || 0,
@@ -568,83 +574,44 @@ export async function getMerchantDashboardSummary(merchant) {
   };
 }
 
-export function createMerchantProduct(merchant, payload) {
-  expirePendingOrders();
+export async function createMerchantProduct(merchant, payload) {
+  await expirePendingOrders();
   const validation = validateCreateMerchantProductInput(payload);
   if (validation.error) return validation;
 
-  const spuId = getNextSpuId();
-  let skuId = getNextSkuId();
-  const spu = {
-    spuId,
-    shopId: merchant.shopId,
-    shopName: merchant.shopName,
-    merchantId: merchant.id,
-    categoryId: Number(payload.categoryId),
-    title: payload.title.trim(),
-    description: payload.description.trim(),
-    mainImage: payload.mainImage.trim(),
-    status: 'DRAFT',
-    skus: payload.skus.map((sku) => ({
-      skuId: skuId++,
-      specJson: sku.specJson,
-      price: Number(sku.price),
-      stock: {
-        available: Number(sku.stock.available),
-        locked: 0,
-      },
-    })),
-  };
+  const category = await categoryRepo.findById(Number(payload.categoryId));
+  if (!category) return { error: 'INVALID_INPUT', message: 'Category does not exist' };
 
-  spus.push(spu);
-  return { product: serializeMerchantProduct(spu) };
+  return productRepo.createMerchantProduct(merchant, payload);
 }
 
-export function submitMerchantProductAudit(merchant, spuId) {
-  expirePendingOrders();
-  const spu = getSpuById(spuId);
-  if (!spu) return { error: 'NOT_FOUND', message: 'Product not found' };
-  if (!ownsSpu(merchant, spu)) {
-    return { error: 'FORBIDDEN', message: 'No permission to operate this product' };
-  }
-  if (spu.status !== 'DRAFT' && spu.status !== 'REJECTED') {
-    return { error: 'INVALID_STATE', message: 'Only draft or rejected products can be submitted' };
-  }
-  spu.status = 'PENDING_AUDIT';
-  spu.submittedAt = new Date().toISOString();
-  delete spu.rejectReason;
-  return {
-    spuId: spu.spuId,
-    status: spu.status,
-    message: 'Product submitted for audit',
-  };
+export async function updateMerchantProduct(merchant, spuId, payload) {
+  await expirePendingOrders();
+  const validation = validateUpdateMerchantProductInput(payload);
+  if (validation.error) return validation;
+
+  const category = await categoryRepo.findById(Number(payload.categoryId));
+  if (!category) return { error: 'INVALID_INPUT', message: 'Category does not exist' };
+
+  return productRepo.updateMerchantProduct(merchant, spuId, payload);
+}
+
+export async function submitMerchantProductAudit(merchant, spuId) {
+  await expirePendingOrders();
+  return productRepo.submitMerchantProductAudit(merchant, spuId);
+}
+
+export async function offShelfMerchantProduct(merchant, spuId) {
+  await expirePendingOrders();
+  return productRepo.offShelfMerchantProduct(merchant, spuId);
 }
 
 export async function auditProduct(spuId, adminId, approved, reason) {
-  expirePendingOrders();
-  const spu = getSpuById(spuId);
-  if (!spu) return { error: 'NOT_FOUND', message: '商品不存在' };
-  if (spu.status !== 'PENDING_AUDIT') {
-    return { error: 'INVALID_STATE', message: '商品不在待审核状态' };
-  }
+  await expirePendingOrders();
   if (!approved && !reason?.trim()) {
     return { error: 'REASON_REQUIRED', message: '驳回须填写原因' };
   }
-  spu.status = approved ? 'ON_SHELF' : 'REJECTED';
-  if (approved) {
-    delete spu.rejectReason;
-  } else {
-    spu.rejectReason = reason.trim();
-  }
-  const auditedAt = new Date().toISOString();
-  await productAuditRepo.insertAudit({
-    spuId,
-    adminId,
-    approved,
-    reason: reason || null,
-    auditedAt,
-  });
-  return { spu };
+  return productRepo.auditProduct(spuId, adminId, approved, reason);
 }
 
 function formatAddressSnapshot(address) {
@@ -949,7 +916,7 @@ export async function auditMerchantAfterSale(merchantId, afterSaleId, { approved
 
 export async function getDashboardSummary() {
   await expirePendingOrders();
-  const pendingProducts = spus.filter((s) => s.status === 'PENDING_AUDIT');
+  const productSummary = await productRepo.getDashboardProductSummary();
   const pendingMerchantCount = await merchantApplicationRepo.countByStatus('PENDING');
   const auditedProductCount = await productAuditRepo.countAll();
   const recentPendingMerchants = await merchantApplicationRepo.findRecentPending(5);
@@ -957,23 +924,15 @@ export async function getDashboardSummary() {
   const recentEscalatedAfterSales = await afterSaleRepo.listRecentEscalated(5);
 
   return {
-    pendingProductCount: pendingProducts.length,
+    pendingProductCount: productSummary.pendingProductCount,
     escalatedAfterSaleCount,
     pendingMerchantCount,
     auditedProductCount,
-    onShelfProductCount: spus.filter((s) => s.status === 'ON_SHELF').length,
-    rejectedProductCount: spus.filter((s) => s.status === 'REJECTED').length,
+    onShelfProductCount: productSummary.onShelfProductCount,
+    rejectedProductCount: productSummary.rejectedProductCount,
     totalOrderCount: await orderRepo.countOrders(),
     pendingPaymentOrderCount: await orderRepo.countOrders('PENDING_PAYMENT'),
-    recentPendingProducts: [...pendingProducts]
-      .sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0))
-      .slice(0, 5)
-      .map((s) => ({
-        spuId: s.spuId,
-        title: s.title,
-        shopName: s.shopName,
-        submittedAt: s.submittedAt,
-      })),
+    recentPendingProducts: productSummary.recentPendingProducts,
     recentPendingMerchants: recentPendingMerchants.map(serializeMerchantApplicationPending),
     recentEscalatedAfterSales: recentEscalatedAfterSales.map(afterSaleRepo.serialize),
   };
