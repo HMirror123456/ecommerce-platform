@@ -9,10 +9,10 @@
 ## 已实现功能
 
 - 用户注册 / 登录（手机号 + 密码）
-- 商品列表（分页、骨架屏）
+- 个人中心（资料编辑、修改密码、我的订单、收货地址）
+- 商品列表（分类筛选、分页）
 - 商品详情（SKU 规格、加购、立即购买）
-- 购物车（改数量、删除、去结算）
-- 收货地址 CRUD / 设默认
+- 购物车（改数量、删除、去结算；下单后清除已购 SKU）
 - 结算下单（立即购买 / 购物车）
 - Mock 支付（倒计时、支付/取消）
 - 订单列表 / 详情
@@ -52,10 +52,11 @@ npm run dev
 | `/login` `/register` | 登录 / 注册 |
 | `/products` `/products/:spuId` | 商品列表 / 详情 |
 | `/cart` | 购物车 |
-| `/addresses` | 收货地址 |
 | `/checkout` | 确认订单 |
-| `/orders` `/orders/:orderId` | 订单列表 / 详情 |
-| `/orders/:orderId/pay` | 订单支付 |
+| `/user` | 个人中心 · 个人信息 |
+| `/user/orders` | 个人中心 · 我的订单 |
+| `/user/addresses` | 个人中心 · 收货地址 |
+| `/orders/:orderId` `/orders/:orderId/pay` | 订单详情 / 支付 |
 
 ## 目录结构
 

@@ -42,16 +42,20 @@ function onSearch() {
         <div class="header-right">
           <router-link to="/products" class="nav-link">首页</router-link>
           <router-link to="/cart" class="nav-link">购物车</router-link>
-          <router-link to="/orders" class="nav-link">我的订单</router-link>
-          <router-link to="/addresses" class="nav-link">收货地址</router-link>
-          <span v-if="auth.phone" class="user-phone">{{ auth.phone }}</span>
+          <router-link to="/user" class="nav-link">个人中心</router-link>
+          <span v-if="auth.nickname || auth.phone" class="user-phone">{{ auth.nickname || auth.phone }}</span>
           <el-button link type="primary" @click="onLogout">退出</el-button>
         </div>
       </div>
     </el-header>
 
     <el-main class="main">
-      <p v-if="pageTitle && !['products', 'product-detail'].includes(route.name)" class="page-breadcrumb">{{ pageTitle }}</p>
+      <p
+        v-if="pageTitle && !['products', 'product-detail', 'profile', 'user-orders', 'user-addresses'].includes(route.name)"
+        class="page-breadcrumb"
+      >
+        {{ pageTitle }}
+      </p>
       <router-view />
     </el-main>
 

@@ -162,11 +162,11 @@ onMounted(loadCheckout);
       <template #header>
         <div class="card-header">
           <span>收货地址</span>
-          <router-link to="/addresses" class="link">管理地址</router-link>
+          <router-link to="/user/addresses" class="link">管理地址</router-link>
         </div>
       </template>
       <el-empty v-if="!loading && addresses.length === 0" description="暂无收货地址">
-        <router-link to="/addresses"><el-button type="primary">去添加</el-button></router-link>
+        <router-link to="/user/addresses"><el-button type="primary">去添加</el-button></router-link>
       </el-empty>
       <el-radio-group v-else v-model="selectedAddressId" class="address-group">
         <el-radio v-for="addr in addresses" :key="addr.id" :label="addr.id" class="address-radio">

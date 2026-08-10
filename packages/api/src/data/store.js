@@ -273,6 +273,57 @@ export async function findUserById(id) {
   return userRepo.findById(id);
 }
 
+export function serializeUserProfile(user) {
+  if (!user) return null;
+  return {
+    userId: user.id,
+    phone: user.phone,
+    nickname: user.nickname || null,
+  };
+}
+
+export async function getUserProfile(userId) {
+  const user = await userRepo.findById(userId);
+  if (!user) return null;
+  return serializeUserProfile(user);
+}
+
+/** 领域规则：手机号唯一且不可改；可改昵称；改密需校验原密码 */
+export async function updateUserProfile(userId, payload = {}) {
+  const user = await userRepo.findById(userId);
+  if (!user) return { error: 'NOT_FOUND', message: '用户不存在' };
+
+  const updates = {};
+  if (payload.nickname !== undefined) {
+    const nickname = String(payload.nickname || '').trim();
+    if (!nickname) return { error: 'INVALID_INPUT', message: '昵称不能为空' };
+    if (nickname.length > 64) return { error: 'INVALID_INPUT', message: '昵称最多 64 个字符' };
+    updates.nickname = nickname;
+  }
+
+  const { currentPassword, newPassword } = payload;
+  const changingPassword = currentPassword != null || newPassword != null;
+  if (changingPassword) {
+    if (!currentPassword || !newPassword) {
+      return { error: 'INVALID_INPUT', message: '修改密码需同时提供当前密码与新密码' };
+    }
+    if (user.password !== String(currentPassword)) {
+      return { error: 'INVALID_PASSWORD', message: '当前密码不正确' };
+    }
+    if (String(newPassword).length < 6) {
+      return { error: 'INVALID_INPUT', message: '新密码至少 6 位' };
+    }
+    updates.password = String(newPassword);
+  }
+
+  if (!Object.keys(updates).length) {
+    return { error: 'INVALID_INPUT', message: '请提供要修改的字段' };
+  }
+
+  const updated = await userRepo.updateProfile(userId, updates);
+  return { profile: serializeUserProfile(updated) };
+}
+
 export async function registerUser({ phone, password }) {
   const normalizedPhone = String(phone || '').trim();
   const normalizedPassword = String(password || '');

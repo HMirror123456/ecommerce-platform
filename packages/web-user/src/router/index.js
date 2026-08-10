@@ -11,6 +11,12 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/register',
+      name: 'register',
+      component: () => import('@/views/RegisterView.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('@/layouts/UserLayout.vue'),
       meta: { requiresAuth: true },
@@ -35,23 +41,39 @@ const router = createRouter({
           meta: { title: '购物车' },
         },
         {
-          path: 'addresses',
-          name: 'addresses',
-          component: () => import('@/views/AddressListView.vue'),
-          meta: { title: '收货地址' },
-        },
-        {
           path: 'checkout',
           name: 'checkout',
           component: () => import('@/views/CheckoutView.vue'),
           meta: { title: '确认订单' },
         },
         {
-          path: 'orders',
-          name: 'orders',
-          component: () => import('@/views/OrderListView.vue'),
-          meta: { title: '我的订单' },
+          path: 'user',
+          component: () => import('@/layouts/ProfileLayout.vue'),
+          meta: { title: '个人中心' },
+          children: [
+            {
+              path: '',
+              name: 'profile',
+              component: () => import('@/views/ProfileView.vue'),
+              meta: { title: '个人信息' },
+            },
+            {
+              path: 'orders',
+              name: 'user-orders',
+              component: () => import('@/views/OrderListView.vue'),
+              meta: { title: '我的订单' },
+            },
+            {
+              path: 'addresses',
+              name: 'user-addresses',
+              component: () => import('@/views/AddressListView.vue'),
+              meta: { title: '收货地址' },
+            },
+          ],
         },
+        // 兼容旧路径
+        { path: 'orders', redirect: '/user/orders' },
+        { path: 'addresses', redirect: '/user/addresses' },
         {
           path: 'orders/:orderId/pay',
           name: 'payment',
@@ -65,12 +87,6 @@ const router = createRouter({
           meta: { title: '订单详情' },
         },
       ],
-    },
-    {
-      path: '/register',
-      name: 'register',
-      component: () => import('@/views/RegisterView.vue'),
-      meta: { public: true },
     },
   ],
 });

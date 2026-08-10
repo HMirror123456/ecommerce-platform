@@ -76,6 +76,23 @@ export async function findById(id) {
   };
 }
 
+export async function updateProfile(userId, { nickname, password }) {
+  const sets = [];
+  const params = [];
+  if (nickname !== undefined) {
+    sets.push('nickname = ?');
+    params.push(nickname);
+  }
+  if (password !== undefined) {
+    sets.push('password = ?');
+    params.push(password);
+  }
+  if (!sets.length) return findById(userId);
+  params.push(userId);
+  await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+  return findById(userId);
+}
+
 export async function findAddressById(userId, addressId) {
   const [rows] = await pool.query(
     'SELECT * FROM addresses WHERE user_id = ? AND id = ? LIMIT 1',

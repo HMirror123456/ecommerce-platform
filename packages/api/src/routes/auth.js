@@ -15,7 +15,11 @@ router.post('/user/register', async (req, res) => {
       return res.status(409).json({ message: result.message });
     }
     const user = result.user;
-    res.status(201).json({ token: signUserToken(user), userId: user.id });
+    res.status(201).json({
+      token: signUserToken(user),
+      userId: user.id,
+      nickname: user.nickname || null,
+    });
   } catch (err) {
     console.error(err);
     res.status(503).json({ message: '服务暂不可用，请确认数据库已启动' });
@@ -28,7 +32,11 @@ router.post('/user/login', async (req, res) => {
   try {
     const user = await findUserByPhone(phone, password);
     if (!user) return res.status(401).json({ message: '账号或密码错误' });
-    res.json({ token: signUserToken(user), userId: user.id });
+    res.json({
+      token: signUserToken(user),
+      userId: user.id,
+      nickname: user.nickname || null,
+    });
   } catch (err) {
     console.error(err);
     res.status(503).json({ message: '服务暂不可用，请确认数据库已启动' });

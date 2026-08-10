@@ -146,13 +146,13 @@ onMounted(loadOrder);
 <template>
   <div class="order-detail-page" v-loading="loading">
     <el-empty v-if="!loading && !order" description="订单不存在">
-      <el-button type="primary" @click="router.push({ name: 'orders' })">返回订单列表</el-button>
+      <el-button type="primary" @click="router.push({ name: 'user-orders' })">返回订单列表</el-button>
     </el-empty>
 
     <template v-else-if="order">
       <div class="page-header">
         <h2 class="page-title">订单详情</h2>
-        <el-button link type="primary" @click="router.push({ name: 'orders' })">返回列表</el-button>
+        <el-button link type="primary" @click="router.push({ name: 'user-orders' })">返回列表</el-button>
       </div>
 
       <el-card shadow="never" class="section-card">
