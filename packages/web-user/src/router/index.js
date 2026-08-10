@@ -15,18 +15,18 @@ const router = createRouter({
       component: () => import('@/layouts/UserLayout.vue'),
       meta: { requiresAuth: true },
       children: [
-        { path: '', redirect: '/cart' },
+        { path: '', redirect: '/products' },
         {
-          path: 'cart',
-          name: 'cart',
-          component: () => import('@/views/CartView.vue'),
-          meta: { title: '购物车' },
+          path: 'products',
+          name: 'products',
+          component: () => import('@/views/ProductListView.vue'),
+          meta: { title: '商品列表' },
         },
         {
-          path: 'addresses',
-          name: 'addresses',
-          component: () => import('@/views/AddressListView.vue'),
-          meta: { title: '收货地址' },
+          path: 'products/:spuId',
+          name: 'product-detail',
+          component: () => import('@/views/ProductDetailView.vue'),
+          meta: { title: '商品详情' },
         },
         {
           path: 'checkout',
@@ -49,7 +49,7 @@ router.beforeEach((to) => {
   const auth = useAuthStore();
   if (to.meta.public) {
     if (auth.isLoggedIn && to.name === 'login') {
-      return to.query.redirect || '/cart';
+      return to.query.redirect || '/products';
     }
     return true;
   }
