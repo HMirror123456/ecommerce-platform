@@ -228,4 +228,15 @@ export async function deleteCartItem(itemId) {
   await pool.query('DELETE FROM cart_items WHERE id = ?', [itemId]);
 }
 
+/** 下单成功后清除购物车中已购买的 SKU */
+export async function deleteCartItemsBySkuIds(userId, skuIds) {
+  const ids = [...new Set((skuIds || []).map(Number).filter((id) => id > 0))];
+  if (!ids.length) return;
+  const placeholders = ids.map(() => '?').join(',');
+  await pool.query(
+    `DELETE FROM cart_items WHERE user_id = ? AND sku_id IN (${placeholders})`,
+    [userId, ...ids],
+  );
+}
+
 export { toIso };

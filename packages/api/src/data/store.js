@@ -791,6 +791,12 @@ export async function createOrder(userId, { addressId, items, remark }) {
     subOrderGroups: [...byMerchant.values()],
   });
 
+  // 领域规则：下单成功后，购物车中对应 SKU 应移除（含购物车结算与立即购买）
+  await userRepo.deleteCartItemsBySkuIds(
+    userId,
+    lineItems.map((item) => item.skuId),
+  );
+
   return { order: serializeOrder(order, { includeSubOrders: true }) };
 }
 

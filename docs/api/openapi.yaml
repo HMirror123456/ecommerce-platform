@@ -456,6 +456,8 @@ paths:
     post:
       tags: [order]
       summary: 创建订单（从购物车或直接购买）
+      description: |
+        创建成功后，将从当前用户购物车中移除本次下单涉及的 SKU。
       security:
         - bearerAuth: []
       requestBody:
