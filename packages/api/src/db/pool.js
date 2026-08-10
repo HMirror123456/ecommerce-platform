@@ -31,7 +31,10 @@ function toIso(value) {
   return String(value);
 }
 
-/** MySQL DATETIME(3) 友好格式（严格模式不接受 ISO 的 T/Z） */
+/**
+ * MySQL DATETIME(3) 友好格式（严格模式不接受 ISO 的 T/Z）。
+ * 使用 UTC 组件写入，与 pool.timezone='Z'、超时判断 UTC_TIMESTAMP(3) 一致。
+ */
 function toMysqlDateTime(value) {
   if (value == null || value === '') return null;
   const d = value instanceof Date ? value : new Date(value);

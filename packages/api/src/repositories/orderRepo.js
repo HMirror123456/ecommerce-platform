@@ -318,8 +318,10 @@ export async function insertPayment({ orderId, userId, amount, channel, status, 
 }
 
 export async function listExpiredPendingOrders() {
+  // payment_deadline 按 UTC 写入（toMysqlDateTime），须与 UTC_TIMESTAMP 比较，
+  // 避免本机时区（如东八区）下用 NOW() 把刚下的单立刻判为超时取消
   const [rows] = await pool.query(
-    `SELECT order_id FROM orders WHERE status = 'PENDING_PAYMENT' AND payment_deadline < NOW(3)`,
+    `SELECT order_id FROM orders WHERE status = 'PENDING_PAYMENT' AND payment_deadline < UTC_TIMESTAMP(3)`,
   );
   const orders = [];
   for (const row of rows) {
