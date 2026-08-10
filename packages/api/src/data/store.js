@@ -273,6 +273,27 @@ export async function findUserById(id) {
   return userRepo.findById(id);
 }
 
+export async function registerUser({ phone, password }) {
+  const normalizedPhone = String(phone || '').trim();
+  const normalizedPassword = String(password || '');
+  if (!/^1\d{10}$/.test(normalizedPhone)) {
+    return { error: 'INVALID_PHONE', message: '请输入有效的 11 位手机号' };
+  }
+  if (normalizedPassword.length < 6) {
+    return { error: 'INVALID_PASSWORD', message: '密码至少 6 位' };
+  }
+  const existing = await userRepo.findByPhoneOnly(normalizedPhone);
+  if (existing) {
+    return { error: 'PHONE_EXISTS', message: '该手机号已注册' };
+  }
+  const user = await userRepo.createUser({
+    phone: normalizedPhone,
+    password: normalizedPassword,
+    nickname: `用户${normalizedPhone.slice(-4)}`,
+  });
+  return { user };
+}
+
 export async function findAddressById(userId, addressId) {
   return userRepo.findAddressById(userId, addressId);
 }
@@ -655,7 +676,7 @@ function formatAddressSnapshot(address) {
   };
 }
 
-function serializeOrder(order, { includeSubOrders = false } = {}) {
+function serializeOrder(order, { includeSubOrders = false, afterSales = null } = {}) {
   const base = {
     orderId: order.orderId,
     orderNo: order.orderNo,
@@ -681,8 +702,14 @@ function serializeOrder(order, { includeSubOrders = false } = {}) {
     }));
     base.addressSnapshot = order.addressSnapshot;
   }
+  if (afterSales) {
+    base.afterSales = afterSales.map(afterSaleRepo.serialize);
+  }
   return base;
 }
+
+const AFTER_SALE_TYPES = new Set(['REFUND_ONLY', 'RETURN_REFUND']);
+const MERCHANT_AFTER_SALE_HOURS = 48;
 
 export async function createOrder(userId, { addressId, items, remark }) {
   await expirePendingOrders();
@@ -780,7 +807,85 @@ export async function getOrderById(userId, orderId) {
   await expirePendingOrders();
   const order = await orderRepo.findByIdAndUser(orderId, userId);
   if (!order) return null;
-  return serializeOrder(order, { includeSubOrders: true });
+  const afterSales = await afterSaleRepo.listByOrderId(orderId);
+  return serializeOrder(order, { includeSubOrders: true, afterSales });
+}
+
+/** 领域规则：SHIPPED/COMPLETED → REFUNDING；AfterSale APPLIED，商家 48h 处理窗口 */
+export async function createAfterSale(userId, orderId, { type, reason, subOrderId } = {}) {
+  await expirePendingOrders();
+  if (!AFTER_SALE_TYPES.has(type)) {
+    return { error: 'INVALID_TYPE', message: '售后类型无效' };
+  }
+  if (!reason?.trim()) {
+    return { error: 'REASON_REQUIRED', message: '请填写售后原因' };
+  }
+
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+  if (!['SHIPPED', 'COMPLETED'].includes(order.status)) {
+    return { error: 'INVALID_STATE', message: '仅已发货或已完成订单可申请售后' };
+  }
+
+  const existing = await afterSaleRepo.listByOrderId(orderId);
+  const hasOpen = existing.some((a) =>
+    ['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING'].includes(a.status),
+  );
+  if (hasOpen) {
+    return { error: 'ALREADY_EXISTS', message: '该订单已有进行中的售后' };
+  }
+
+  let sub = null;
+  if (subOrderId) {
+    sub = order.subOrders.find((s) => s.subOrderId === Number(subOrderId));
+    if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+  } else {
+    sub = order.subOrders.find((s) => ['SHIPPED', 'COMPLETED'].includes(s.status)) || order.subOrders[0];
+  }
+  if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+
+  const now = new Date();
+  const merchantDeadline = new Date(now.getTime() + MERCHANT_AFTER_SALE_HOURS * 60 * 60 * 1000);
+  const created = await afterSaleRepo.create({
+    orderId: order.orderId,
+    orderNo: order.orderNo,
+    subOrderId: sub.subOrderId,
+    userId,
+    merchantId: sub.merchantId,
+    shopName: sub.shopName,
+    type,
+    reason: reason.trim(),
+    status: 'APPLIED',
+    appliedAt: now,
+    merchantDeadline,
+    items: sub.items,
+  });
+
+  await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
+  await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDING');
+
+  return { afterSale: afterSaleRepo.serialize(created) };
+}
+
+/** 领域规则：APPLIED/REJECTED → ESCALATED（用户申请平台介入） */
+export async function escalateAfterSale(userId, orderId, afterSaleId) {
+  await expirePendingOrders();
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item || item.orderId !== orderId || item.userId !== userId) {
+    return { error: 'NOT_FOUND', message: '售后单不存在' };
+  }
+  if (!['APPLIED', 'REJECTED'].includes(item.status)) {
+    return { error: 'INVALID_STATE', message: '当前售后状态不可申请平台介入' };
+  }
+
+  const updated = await afterSaleRepo.escalate(afterSaleId, new Date());
+  if (order.status !== 'REFUNDING') {
+    await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
+  }
+  return { afterSale: afterSaleRepo.serialize(updated) };
 }
 
 export async function getAdminOrders({ orderNo, userId, merchantId, status, page = 1, pageSize = 20 } = {}) {

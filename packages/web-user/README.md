@@ -8,11 +8,15 @@
 
 ## 已实现功能
 
-- 用户登录（手机号 + 密码）
-- 商品列表（分页、骨架屏加载）
-- 商品详情（SKU 规格选择、立即购买）
-- 立即购买结算页（通过 URL query 传入商品）
-- Mock 支付页（15 分钟倒计时、支付/取消）
+- 用户注册 / 登录（手机号 + 密码）
+- 商品列表（分页、骨架屏）
+- 商品详情（SKU 规格、加购、立即购买）
+- 购物车（改数量、删除、去结算）
+- 收货地址 CRUD / 设默认
+- 结算下单（立即购买 / 购物车）
+- Mock 支付（倒计时、支付/取消）
+- 订单列表 / 详情
+- 售后申请（SHIPPED/COMPLETED → REFUNDING）与申请平台介入（→ ESCALATED）
 
 ## 启动方式
 
@@ -35,38 +39,34 @@ npm run dev
 
 ## 演示流程
 
-1. 访问商品列表：`http://localhost:5175/products`（未登录会跳转登录）
-2. 使用演示账号登录：`13800138000` / `123456`
-3. 点击商品进入详情页，选择规格和数量，点击「立即购买」
-4. 在结算页确认订单并提交，进入支付页完成 Mock 支付
-5. 商家端验证：登录 `merchant1/123456`，在订单列表查看 `PENDING_SHIPMENT` 订单
+1. 注册新账号，或使用演示账号登录：`13800138000` / `123456`
+2. 商品详情 → 加入购物车 → 购物车结算 → Mock 支付
+3. 或详情页「立即购买」直达结算
+4. 「我的订单」查看状态；已发货/已完成订单可申请售后，拒绝后可申请平台介入
+5. 商家端验证：`merchant1/123456` 查看待发货与售后
 
 ## 主要页面
 
 | 路由 | 说明 |
 |------|------|
-| `/login` | 用户登录 |
-| `/products` | 商品列表 |
-| `/products/:spuId` | 商品详情 |
-| `/checkout?spuId=&skuId=&quantity=` | 确认订单（立即购买） |
+| `/login` `/register` | 登录 / 注册 |
+| `/products` `/products/:spuId` | 商品列表 / 详情 |
+| `/cart` | 购物车 |
+| `/addresses` | 收货地址 |
+| `/checkout` | 确认订单 |
+| `/orders` `/orders/:orderId` | 订单列表 / 详情 |
 | `/orders/:orderId/pay` | 订单支付 |
-
-## 当前限制
-
-- 收货地址固定为演示数据（`addressId=1`），地址管理待 P1 实现
-- 购物车 API 未实现，暂通过 URL query 或路由 state 传入商品
-- 用户注册接口后端未实现
 
 ## 目录结构
 
 ```text
 src/
-  api/          client.js, auth.js, product.js, order.js
+  api/          client.js, auth.js, product.js, cart.js, address.js, order.js
   layouts/      UserLayout.vue
   router/       index.js
   stores/       auth.js
   styles/       global.css
-  views/        LoginView.vue, ProductListView.vue, ProductDetailView.vue, CheckoutView.vue, PaymentView.vue
+  views/        Login/Register/Product*/Cart/Address/Checkout/Order*/Payment
 ```
 
 ## Cursor 开发

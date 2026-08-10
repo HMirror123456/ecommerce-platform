@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import {
   cancelOrder,
+  createAfterSale,
   createOrder,
+  escalateAfterSale,
   getOrderById,
   getOrdersByUser,
   payOrder,
@@ -64,6 +66,43 @@ router.post('/:id/cancel', requireUser, async (req, res, next) => {
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
     if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
     res.json(result.order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/after-sales', requireUser, async (req, res, next) => {
+  try {
+    const result = await createAfterSale(req.user.id, Number(req.params.id), req.body || {});
+    if (result.error === 'NOT_FOUND' || result.error === 'SUB_ORDER_NOT_FOUND') {
+      return res.status(404).json({ message: result.message });
+    }
+    if (
+      result.error === 'INVALID_STATE' ||
+      result.error === 'ALREADY_EXISTS' ||
+      result.error === 'INVALID_TYPE' ||
+      result.error === 'REASON_REQUIRED'
+    ) {
+      return res.status(result.error === 'INVALID_STATE' || result.error === 'ALREADY_EXISTS' ? 409 : 400).json({
+        message: result.message,
+      });
+    }
+    res.status(201).json(result.afterSale);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/after-sales/:afterSaleId/escalate', requireUser, async (req, res, next) => {
+  try {
+    const result = await escalateAfterSale(
+      req.user.id,
+      Number(req.params.id),
+      Number(req.params.afterSaleId),
+    );
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    res.json({ message: '已申请平台介入', afterSale: result.afterSale });
   } catch (err) {
     next(err);
   }

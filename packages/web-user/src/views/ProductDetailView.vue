@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import { addCartItem } from '@/api/cart';
 import { fetchProductDetail } from '@/api/product';
 
 const route = useRoute();
@@ -10,6 +11,7 @@ const router = useRouter();
 const spuId = computed(() => Number(route.params.spuId));
 
 const loading = ref(false);
+const adding = ref(false);
 const product = ref(null);
 const selectedSkuId = ref(null);
 const quantity = ref(1);
@@ -44,15 +46,33 @@ function selectSku(sku) {
   }
 }
 
-function onBuyNow() {
+function ensureSkuReady() {
   if (!selectedSku.value) {
     ElMessage.warning('请选择商品规格');
-    return;
+    return false;
   }
   if (selectedSku.value.stock <= 0) {
     ElMessage.warning('所选规格暂无库存');
-    return;
+    return false;
   }
+  return true;
+}
+
+async function onAddCart() {
+  if (!ensureSkuReady()) return;
+  adding.value = true;
+  try {
+    await addCartItem(selectedSku.value.skuId, quantity.value);
+    ElMessage.success('已加入购物车');
+  } catch (e) {
+    ElMessage.error(e.message || '加入购物车失败');
+  } finally {
+    adding.value = false;
+  }
+}
+
+function onBuyNow() {
+  if (!ensureSkuReady()) return;
   router.push({
     name: 'checkout',
     query: {
@@ -151,6 +171,15 @@ onMounted(loadProduct);
           </div>
 
           <div class="action-section">
+            <el-button
+              size="large"
+              class="cart-btn"
+              :loading="adding"
+              :disabled="!selectedSku || selectedSku.stock <= 0"
+              @click="onAddCart"
+            >
+              加入购物车
+            </el-button>
             <el-button
               type="primary"
               size="large"
@@ -322,10 +351,14 @@ onMounted(loadProduct);
 
 .action-section {
   margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
+.cart-btn,
 .buy-btn {
-  min-width: 160px;
+  min-width: 140px;
   height: 48px;
   font-size: 16px;
   border-radius: 4px;

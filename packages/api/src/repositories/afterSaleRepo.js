@@ -34,6 +34,59 @@ export async function findById(afterSaleId) {
   return rows[0] ? mapRow(rows[0]) : null;
 }
 
+export async function listByOrderId(orderId) {
+  const [rows] = await pool.query(
+    'SELECT * FROM after_sales WHERE order_id = ? ORDER BY applied_at DESC',
+    [orderId],
+  );
+  return rows.map(mapRow);
+}
+
+export async function create({
+  orderId,
+  orderNo,
+  subOrderId,
+  userId,
+  merchantId,
+  shopName,
+  type,
+  reason,
+  status,
+  appliedAt,
+  merchantDeadline,
+  items,
+}) {
+  const [result] = await pool.query(
+    `INSERT INTO after_sales (
+      order_id, order_no, sub_order_id, user_id, merchant_id, shop_name,
+      type, reason, status, applied_at, merchant_deadline, items
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      orderId,
+      orderNo,
+      subOrderId,
+      userId,
+      merchantId,
+      shopName,
+      type,
+      reason,
+      status,
+      appliedAt,
+      merchantDeadline,
+      JSON.stringify(items || []),
+    ],
+  );
+  return findById(result.insertId);
+}
+
+export async function escalate(afterSaleId, escalatedAt) {
+  await pool.query(
+    `UPDATE after_sales SET status = 'ESCALATED', escalated_at = ? WHERE after_sale_id = ?`,
+    [escalatedAt, afterSaleId],
+  );
+  return findById(afterSaleId);
+}
+
 export async function listByMerchant(merchantId, status) {
   let sql = 'SELECT * FROM after_sales WHERE merchant_id = ?';
   const params = [merchantId];

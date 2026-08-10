@@ -29,10 +29,28 @@ const router = createRouter({
           meta: { title: '商品详情' },
         },
         {
+          path: 'cart',
+          name: 'cart',
+          component: () => import('@/views/CartView.vue'),
+          meta: { title: '购物车' },
+        },
+        {
+          path: 'addresses',
+          name: 'addresses',
+          component: () => import('@/views/AddressListView.vue'),
+          meta: { title: '收货地址' },
+        },
+        {
           path: 'checkout',
           name: 'checkout',
           component: () => import('@/views/CheckoutView.vue'),
           meta: { title: '确认订单' },
+        },
+        {
+          path: 'orders',
+          name: 'orders',
+          component: () => import('@/views/OrderListView.vue'),
+          meta: { title: '我的订单' },
         },
         {
           path: 'orders/:orderId/pay',
@@ -40,7 +58,19 @@ const router = createRouter({
           component: () => import('@/views/PaymentView.vue'),
           meta: { title: '订单支付' },
         },
+        {
+          path: 'orders/:orderId',
+          name: 'order-detail',
+          component: () => import('@/views/OrderDetailView.vue'),
+          meta: { title: '订单详情' },
+        },
       ],
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('@/views/RegisterView.vue'),
+      meta: { public: true },
     },
   ],
 });
@@ -48,7 +78,7 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore();
   if (to.meta.public) {
-    if (auth.isLoggedIn && to.name === 'login') {
+    if (auth.isLoggedIn && (to.name === 'login' || to.name === 'register')) {
       return to.query.redirect || '/products';
     }
     return true;

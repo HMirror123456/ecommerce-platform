@@ -121,9 +121,10 @@ onUnmounted(() => {
         <template #extra>
           <p class="result-meta">订单号：{{ order.orderNo }}</p>
           <p class="result-meta">支付金额：{{ formatPrice(order.totalAmount) }}</p>
-          <el-button type="primary" @click="router.push({ name: 'products' })">
-            继续购物
+          <el-button type="primary" @click="router.push({ name: 'order-detail', params: { orderId: order.orderId } })">
+            查看订单
           </el-button>
+          <el-button @click="router.push({ name: 'products' })">继续购物</el-button>
         </template>
       </el-result>
 

@@ -37,6 +37,29 @@ export async function findByPhone(phone, password) {
   };
 }
 
+export async function findByPhoneOnly(phone) {
+  const [rows] = await pool.query(
+    'SELECT id, phone, password, nickname FROM users WHERE phone = ? LIMIT 1',
+    [phone],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    phone: row.phone,
+    password: row.password,
+    nickname: row.nickname,
+  };
+}
+
+export async function createUser({ phone, password, nickname }) {
+  const [result] = await pool.query(
+    'INSERT INTO users (phone, password, nickname) VALUES (?, ?, ?)',
+    [phone, password, nickname || null],
+  );
+  return findById(result.insertId);
+}
+
 export async function findById(id) {
   const [rows] = await pool.query(
     'SELECT id, phone, password, nickname FROM users WHERE id = ? LIMIT 1',
