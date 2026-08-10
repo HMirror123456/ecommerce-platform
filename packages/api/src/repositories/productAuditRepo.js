@@ -1,4 +1,4 @@
-import pool, { mapProductAuditRow } from '../db/pool.js';
+import pool, { mapProductAuditRow, toMysqlDateTime } from '../db/pool.js';
 
 export async function countAll() {
   const [rows] = await pool.query('SELECT COUNT(*) AS cnt FROM product_audits');
@@ -9,7 +9,7 @@ export async function insertAudit({ spuId, adminId, approved, reason, auditedAt 
   const [result] = await pool.query(
     `INSERT INTO product_audits (spu_id, admin_id, approved, reason, audited_at)
      VALUES (?, ?, ?, ?, ?)`,
-    [spuId, adminId, approved ? 1 : 0, reason || null, auditedAt],
+    [spuId, adminId, approved ? 1 : 0, reason || null, toMysqlDateTime(auditedAt)],
   );
   return { id: result.insertId, spuId, adminId, approved, reason, auditedAt };
 }

@@ -1,4 +1,4 @@
-import pool, { toIso } from '../db/pool.js';
+import pool, { toIso, toMysqlDateTime } from '../db/pool.js';
 
 function mapRow(row) {
   let items = row.items;
@@ -71,8 +71,8 @@ export async function create({
       type,
       reason,
       status,
-      appliedAt,
-      merchantDeadline,
+      toMysqlDateTime(appliedAt),
+      toMysqlDateTime(merchantDeadline),
       JSON.stringify(items || []),
     ],
   );
@@ -82,7 +82,7 @@ export async function create({
 export async function escalate(afterSaleId, escalatedAt) {
   await pool.query(
     `UPDATE after_sales SET status = 'ESCALATED', escalated_at = ? WHERE after_sale_id = ?`,
-    [escalatedAt, afterSaleId],
+    [toMysqlDateTime(escalatedAt), afterSaleId],
   );
   return findById(afterSaleId);
 }
@@ -126,7 +126,7 @@ export async function countByStatus(status) {
 export async function updateAudit(afterSaleId, { status, auditReason, auditedAt }) {
   await pool.query(
     'UPDATE after_sales SET status = ?, audit_reason = ?, audited_at = ? WHERE after_sale_id = ?',
-    [status, auditReason, auditedAt, afterSaleId],
+    [status, auditReason, toMysqlDateTime(auditedAt), afterSaleId],
   );
   return findById(afterSaleId);
 }

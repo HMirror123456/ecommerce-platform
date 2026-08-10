@@ -1,4 +1,4 @@
-import pool, { toIso } from '../db/pool.js';
+import pool, { toIso, toMysqlDateTime } from '../db/pool.js';
 
 function parseJson(value) {
   if (!value) return null;
@@ -110,8 +110,8 @@ export async function createOrderRecord({
         remark,
         addressId,
         JSON.stringify(addressSnapshot),
-        createdAt,
-        paymentDeadline,
+        toMysqlDateTime(createdAt),
+        toMysqlDateTime(paymentDeadline),
       ],
     );
     const orderId = orderResult.insertId;
@@ -224,10 +224,11 @@ export async function updateOrder(orderId, fields) {
     cancelledAt: 'cancelled_at',
     cancelReason: 'cancel_reason',
   };
+  const dateFields = new Set(['paidAt', 'cancelledAt']);
   for (const [key, col] of Object.entries(map)) {
     if (fields[key] !== undefined) {
       sets.push(`${col} = ?`);
-      params.push(fields[key]);
+      params.push(dateFields.has(key) ? toMysqlDateTime(fields[key]) : fields[key]);
     }
   }
   if (!sets.length) return;
@@ -303,7 +304,7 @@ export async function insertPayment({ orderId, userId, amount, channel, status, 
   const [result] = await pool.query(
     `INSERT INTO payments (order_id, user_id, amount, channel, status, paid_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [orderId, userId, amount, channel, status, paidAt],
+    [orderId, userId, amount, channel, status, toMysqlDateTime(paidAt)],
   );
   return {
     paymentId: result.insertId,
