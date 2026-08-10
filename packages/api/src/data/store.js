@@ -7,6 +7,7 @@ import * as productAuditRepo from '../repositories/productAuditRepo.js';
 import * as userRepo from '../repositories/userRepo.js';
 import * as orderRepo from '../repositories/orderRepo.js';
 import * as afterSaleRepo from '../repositories/afterSaleRepo.js';
+import * as favoriteRepo from '../repositories/favoriteRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -597,6 +598,67 @@ export function getPublicProducts(page = 1, pageSize = 20, categoryId) {
 
 export function getCategories() {
   return categories;
+}
+
+function serializeFavoriteItem(favorite, spu) {
+  if (!spu) {
+    return {
+      favoriteId: favorite.favoriteId,
+      spuId: favorite.spuId,
+      title: '商品已下架或不存在',
+      mainImage: null,
+      minPrice: null,
+      shopName: null,
+      status: 'UNAVAILABLE',
+      createdAt: favorite.createdAt,
+    };
+  }
+  const prices = (spu.skus || []).map((s) => s.price);
+  return {
+    favoriteId: favorite.favoriteId,
+    spuId: favorite.spuId,
+    title: spu.title,
+    mainImage: spu.mainImage,
+    minPrice: prices.length ? Math.min(...prices) : null,
+    shopName: spu.shopName || null,
+    status: spu.status,
+    createdAt: favorite.createdAt,
+  };
+}
+
+export async function getFavorites(userId) {
+  const list = await favoriteRepo.listByUser(userId);
+  return list.map((item) => serializeFavoriteItem(item, getSpuById(item.spuId)));
+}
+
+export async function isFavorite(userId, spuId) {
+  const item = await favoriteRepo.findByUserAndSpu(userId, Number(spuId));
+  return { spuId: Number(spuId), favorited: Boolean(item) };
+}
+
+/** 领域规则：仅可收藏已上架 SPU；同一用户同一 SPU 唯一 */
+export async function addFavorite(userId, spuId) {
+  const id = Number(spuId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return { error: 'INVALID_INPUT', message: 'spuId 无效' };
+  }
+  const spu = getSpuById(id);
+  if (!spu || spu.status !== 'ON_SHELF') {
+    return { error: 'PRODUCT_NOT_ON_SHELF', message: '商品不存在或未上架' };
+  }
+  const existing = await favoriteRepo.findByUserAndSpu(userId, id);
+  if (existing) {
+    return { error: 'ALREADY_EXISTS', message: '已收藏该商品' };
+  }
+  const created = await favoriteRepo.create(userId, id);
+  return { favorite: serializeFavoriteItem(created, spu) };
+}
+
+export async function removeFavorite(userId, spuId) {
+  const id = Number(spuId);
+  const removed = await favoriteRepo.remove(userId, id);
+  if (!removed) return { error: 'NOT_FOUND', message: '未收藏该商品' };
+  return { ok: true };
 }
 
 export function getPublicProductDetail(spuId) {

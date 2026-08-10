@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { addCartItem } from '@/api/cart';
+import { addFavorite, checkFavorite, removeFavorite } from '@/api/favorite';
 import { fetchProductDetail } from '@/api/product';
 
 const route = useRoute();
@@ -12,6 +13,8 @@ const spuId = computed(() => Number(route.params.spuId));
 
 const loading = ref(false);
 const adding = ref(false);
+const favoriting = ref(false);
+const favorited = ref(false);
 const product = ref(null);
 const selectedSkuId = ref(null);
 const quantity = ref(1);
@@ -83,11 +86,40 @@ function onBuyNow() {
   });
 }
 
+async function loadFavoriteState() {
+  try {
+    const data = await checkFavorite(spuId.value);
+    favorited.value = Boolean(data.favorited);
+  } catch {
+    favorited.value = false;
+  }
+}
+
+async function onToggleFavorite() {
+  favoriting.value = true;
+  try {
+    if (favorited.value) {
+      await removeFavorite(spuId.value);
+      favorited.value = false;
+      ElMessage.success('已取消收藏');
+    } else {
+      await addFavorite(spuId.value);
+      favorited.value = true;
+      ElMessage.success('已加入收藏');
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '操作失败');
+  } finally {
+    favoriting.value = false;
+  }
+}
+
 async function loadProduct() {
   loading.value = true;
   product.value = null;
   selectedSkuId.value = null;
   quantity.value = 1;
+  favorited.value = false;
 
   try {
     const data = await fetchProductDetail(spuId.value);
@@ -96,6 +128,7 @@ async function loadProduct() {
     if (firstAvailable) {
       selectedSkuId.value = firstAvailable.skuId;
     }
+    await loadFavoriteState();
   } catch (e) {
     ElMessage.error(e.message || '加载商品失败');
   } finally {
@@ -171,6 +204,16 @@ onMounted(loadProduct);
           </div>
 
           <div class="action-section">
+            <el-button
+              size="large"
+              class="fav-btn"
+              :loading="favoriting"
+              :type="favorited ? 'danger' : 'default'"
+              plain
+              @click="onToggleFavorite"
+            >
+              {{ favorited ? '已收藏' : '收藏' }}
+            </el-button>
             <el-button
               size="large"
               class="cart-btn"
@@ -356,9 +399,10 @@ onMounted(loadProduct);
   gap: 12px;
 }
 
+.fav-btn,
 .cart-btn,
 .buy-btn {
-  min-width: 140px;
+  min-width: 120px;
   height: 48px;
   font-size: 16px;
   border-radius: 4px;

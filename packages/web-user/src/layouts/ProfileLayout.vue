@@ -9,11 +9,13 @@ const auth = useAuthStore();
 const menus = [
   { name: 'profile', label: '个人信息', path: '/user' },
   { name: 'user-orders', label: '我的订单', path: '/user/orders' },
+  { name: 'user-favorites', label: '我的收藏', path: '/user/favorites' },
   { name: 'user-addresses', label: '收货地址', path: '/user/addresses' },
 ];
 
 const activePath = computed(() => {
   if (route.path.startsWith('/user/orders')) return '/user/orders';
+  if (route.path.startsWith('/user/favorites')) return '/user/favorites';
   if (route.path.startsWith('/user/addresses')) return '/user/addresses';
   return '/user';
 });

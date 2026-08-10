@@ -51,7 +51,7 @@ function onSearch() {
 
     <el-main class="main">
       <p
-        v-if="pageTitle && !['products', 'product-detail', 'profile', 'user-orders', 'user-addresses'].includes(route.name)"
+        v-if="pageTitle && !['products', 'product-detail', 'profile', 'user-orders', 'user-favorites', 'user-addresses'].includes(route.name)"
         class="page-breadcrumb"
       >
         {{ pageTitle }}
