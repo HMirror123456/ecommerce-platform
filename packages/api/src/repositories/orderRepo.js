@@ -1,4 +1,4 @@
-import pool, { toIso } from '../db/pool.js';
+import pool, { toIso, toMysqlDateTime } from '../db/pool.js';
 
 function parseJson(value) {
   if (!value) return null;
@@ -110,8 +110,8 @@ export async function createOrderRecord({
         remark,
         addressId,
         JSON.stringify(addressSnapshot),
-        createdAt,
-        paymentDeadline,
+        toMysqlDateTime(createdAt),
+        toMysqlDateTime(paymentDeadline),
       ],
     );
     const orderId = orderResult.insertId;
@@ -224,10 +224,11 @@ export async function updateOrder(orderId, fields) {
     cancelledAt: 'cancelled_at',
     cancelReason: 'cancel_reason',
   };
+  const dateFields = new Set(['paidAt', 'cancelledAt']);
   for (const [key, col] of Object.entries(map)) {
     if (fields[key] !== undefined) {
       sets.push(`${col} = ?`);
-      params.push(fields[key]);
+      params.push(dateFields.has(key) ? toMysqlDateTime(fields[key]) : fields[key]);
     }
   }
   if (!sets.length) return;
@@ -303,7 +304,7 @@ export async function insertPayment({ orderId, userId, amount, channel, status, 
   const [result] = await pool.query(
     `INSERT INTO payments (order_id, user_id, amount, channel, status, paid_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [orderId, userId, amount, channel, status, paidAt],
+    [orderId, userId, amount, channel, status, toMysqlDateTime(paidAt)],
   );
   return {
     paymentId: result.insertId,
@@ -317,8 +318,10 @@ export async function insertPayment({ orderId, userId, amount, channel, status, 
 }
 
 export async function listExpiredPendingOrders() {
+  // payment_deadline 按 UTC 写入（toMysqlDateTime），须与 UTC_TIMESTAMP 比较，
+  // 避免本机时区（如东八区）下用 NOW() 把刚下的单立刻判为超时取消
   const [rows] = await pool.query(
-    `SELECT order_id FROM orders WHERE status = 'PENDING_PAYMENT' AND payment_deadline < NOW(3)`,
+    `SELECT order_id FROM orders WHERE status = 'PENDING_PAYMENT' AND payment_deadline < UTC_TIMESTAMP(3)`,
   );
   const orders = [];
   for (const row of rows) {

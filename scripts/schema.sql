@@ -149,6 +149,16 @@ CREATE TABLE IF NOT EXISTS cart_items (
   CONSTRAINT fk_cart_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS favorites (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  user_id INT NOT NULL,
+  spu_id INT NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  UNIQUE KEY uk_favorites_user_spu (user_id, spu_id),
+  INDEX idx_favorites_user (user_id),
+  CONSTRAINT fk_favorites_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS orders (
   order_id INT PRIMARY KEY AUTO_INCREMENT,
   order_no VARCHAR(64) NOT NULL UNIQUE,

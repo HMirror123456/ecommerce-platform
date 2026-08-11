@@ -8,6 +8,8 @@ import categoriesRoutes from './routes/categories.js';
 import ordersRoutes from './routes/orders.js';
 import merchantRoutes from './routes/merchant.js';
 import productsRoutes from './routes/products.js';
+import usersRoutes from './routes/users.js';
+import favoritesRoutes from './routes/favorites.js';
 import { checkDbConnection } from './db/pool.js';
 
 const app = express();
@@ -19,7 +21,9 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/cart', cartRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/api/users/addresses', addressesRoutes);
+app.use('/api/favorites', favoritesRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/merchant', merchantRoutes);

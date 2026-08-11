@@ -5,8 +5,9 @@ import * as merchantRepo from '../repositories/merchantRepo.js';
 import * as merchantApplicationRepo from '../repositories/merchantApplicationRepo.js';
 import * as productAuditRepo from '../repositories/productAuditRepo.js';
 import * as userRepo from '../repositories/userRepo.js';
-import * as orderRepo from '../repositories/orderRepo.js';
+import * as orderRepo from '../repositories/orderRepo.js';s
 import * as afterSaleRepo from '../repositories/afterSaleRepo.js';
+import * as favoriteRepo from '../repositories/favoriteRepo.js';
 import * as categoryRepo from '../repositories/categoryRepo.js';
 import * as productRepo from '../repositories/productRepo.js';
 import * as stockRepo from '../repositories/stockRepo.js';
@@ -317,6 +318,78 @@ export async function findUserById(id) {
   return userRepo.findById(id);
 }
 
+export function serializeUserProfile(user) {
+  if (!user) return null;
+  return {
+    userId: user.id,
+    phone: user.phone,
+    nickname: user.nickname || null,
+  };
+}
+
+export async function getUserProfile(userId) {
+  const user = await userRepo.findById(userId);
+  if (!user) return null;
+  return serializeUserProfile(user);
+}
+
+/** 领域规则：手机号唯一且不可改；可改昵称；改密需校验原密码 */
+export async function updateUserProfile(userId, payload = {}) {
+  const user = await userRepo.findById(userId);
+  if (!user) return { error: 'NOT_FOUND', message: '用户不存在' };
+
+  const updates = {};
+  if (payload.nickname !== undefined) {
+    const nickname = String(payload.nickname || '').trim();
+    if (!nickname) return { error: 'INVALID_INPUT', message: '昵称不能为空' };
+    if (nickname.length > 64) return { error: 'INVALID_INPUT', message: '昵称最多 64 个字符' };
+    updates.nickname = nickname;
+  }
+
+  const { currentPassword, newPassword } = payload;
+  const changingPassword = currentPassword != null || newPassword != null;
+  if (changingPassword) {
+    if (!currentPassword || !newPassword) {
+      return { error: 'INVALID_INPUT', message: '修改密码需同时提供当前密码与新密码' };
+    }
+    if (user.password !== String(currentPassword)) {
+      return { error: 'INVALID_PASSWORD', message: '当前密码不正确' };
+    }
+    if (String(newPassword).length < 6) {
+      return { error: 'INVALID_INPUT', message: '新密码至少 6 位' };
+    }
+    updates.password = String(newPassword);
+  }
+
+  if (!Object.keys(updates).length) {
+    return { error: 'INVALID_INPUT', message: '请提供要修改的字段' };
+  }
+
+  const updated = await userRepo.updateProfile(userId, updates);
+  return { profile: serializeUserProfile(updated) };
+}
+
+export async function registerUser({ phone, password }) {
+  const normalizedPhone = String(phone || '').trim();
+  const normalizedPassword = String(password || '');
+  if (!/^1\d{10}$/.test(normalizedPhone)) {
+    return { error: 'INVALID_PHONE', message: '请输入有效的 11 位手机号' };
+  }
+  if (normalizedPassword.length < 6) {
+    return { error: 'INVALID_PASSWORD', message: '密码至少 6 位' };
+  }
+  const existing = await userRepo.findByPhoneOnly(normalizedPhone);
+  if (existing) {
+    return { error: 'PHONE_EXISTS', message: '该手机号已注册' };
+  }
+  const user = await userRepo.createUser({
+    phone: normalizedPhone,
+    password: normalizedPassword,
+    nickname: `用户${normalizedPhone.slice(-4)}`,
+  });
+  return { user };
+}
+
 export async function findAddressById(userId, addressId) {
   return userRepo.findAddressById(userId, addressId);
 }
@@ -532,6 +605,71 @@ export async function getCategories() {
   return categoryRepo.listTree();
 }
 
+function serializeFavoriteItem(favorite, spu) {
+  if (!spu) {
+    return {
+      favoriteId: favorite.favoriteId,
+      spuId: favorite.spuId,
+      title: '商品已下架或不存在',
+      mainImage: null,
+      minPrice: null,
+      shopName: null,
+      status: 'UNAVAILABLE',
+      createdAt: favorite.createdAt,
+    };
+  }
+  const prices = (spu.skus || []).map((s) => s.price);
+  return {
+    favoriteId: favorite.favoriteId,
+    spuId: favorite.spuId,
+    title: spu.title,
+    mainImage: spu.mainImage,
+    minPrice: prices.length ? Math.min(...prices) : null,
+    shopName: spu.shopName || null,
+    status: spu.status,
+    createdAt: favorite.createdAt,
+  };
+}
+
+export async function getFavorites(userId) {
+  const list = await favoriteRepo.listByUser(userId);
+  return list.map((item) => serializeFavoriteItem(item, getSpuById(item.spuId)));
+}
+
+export async function isFavorite(userId, spuId) {
+  const item = await favoriteRepo.findByUserAndSpu(userId, Number(spuId));
+  return { spuId: Number(spuId), favorited: Boolean(item) };
+}
+
+/** 领域规则：仅可收藏已上架 SPU；同一用户同一 SPU 唯一 */
+export async function addFavorite(userId, spuId) {
+  const id = Number(spuId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return { error: 'INVALID_INPUT', message: 'spuId 无效' };
+  }
+  const spu = getSpuById(id);
+  if (!spu || spu.status !== 'ON_SHELF') {
+    return { error: 'PRODUCT_NOT_ON_SHELF', message: '商品不存在或未上架' };
+  }
+  const existing = await favoriteRepo.findByUserAndSpu(userId, id);
+  if (existing) {
+    return { error: 'ALREADY_EXISTS', message: '已收藏该商品' };
+  }
+  const created = await favoriteRepo.create(userId, id);
+  return { favorite: serializeFavoriteItem(created, spu) };
+}
+
+export async function removeFavorite(userId, spuId) {
+  const id = Number(spuId);
+  const removed = await favoriteRepo.remove(userId, id);
+  if (!removed) return { error: 'NOT_FOUND', message: '未收藏该商品' };
+  return { ok: true };
+}
+
+export function getPublicProductDetail(spuId) {
+  const spu = getSpuById(spuId);
+  if (!spu || spu.status !== 'ON_SHELF') return null;
+  return serializePublicProductDetail(spu);
 export async function getPublicProductDetail(spuId) {
   await expirePendingOrders();
   return productRepo.findPublicProductDetail(spuId);
@@ -621,7 +759,7 @@ function formatAddressSnapshot(address) {
   };
 }
 
-function serializeOrder(order, { includeSubOrders = false } = {}) {
+function serializeOrder(order, { includeSubOrders = false, afterSales = null } = {}) {
   const base = {
     orderId: order.orderId,
     orderNo: order.orderNo,
@@ -647,8 +785,14 @@ function serializeOrder(order, { includeSubOrders = false } = {}) {
     }));
     base.addressSnapshot = order.addressSnapshot;
   }
+  if (afterSales) {
+    base.afterSales = afterSales.map(afterSaleRepo.serialize);
+  }
   return base;
 }
+
+const AFTER_SALE_TYPES = new Set(['REFUND_ONLY', 'RETURN_REFUND']);
+const MERCHANT_AFTER_SALE_HOURS = 48;
 
 export async function createOrder(userId, { addressId, items, remark }) {
   await expirePendingOrders();
@@ -735,6 +879,12 @@ export async function createOrder(userId, { addressId, items, remark }) {
     throw err;
   }
 
+  // 领域规则：下单成功后，购物车中对应 SKU 应移除（含购物车结算与立即购买）
+  await userRepo.deleteCartItemsBySkuIds(
+    userId,
+    lineItems.map((item) => item.skuId),
+  );
+
   return { order: serializeOrder(order, { includeSubOrders: true }) };
 }
 
@@ -751,7 +901,85 @@ export async function getOrderById(userId, orderId) {
   await expirePendingOrders();
   const order = await orderRepo.findByIdAndUser(orderId, userId);
   if (!order) return null;
-  return serializeOrder(order, { includeSubOrders: true });
+  const afterSales = await afterSaleRepo.listByOrderId(orderId);
+  return serializeOrder(order, { includeSubOrders: true, afterSales });
+}
+
+/** 领域规则：SHIPPED/COMPLETED → REFUNDING；AfterSale APPLIED，商家 48h 处理窗口 */
+export async function createAfterSale(userId, orderId, { type, reason, subOrderId } = {}) {
+  await expirePendingOrders();
+  if (!AFTER_SALE_TYPES.has(type)) {
+    return { error: 'INVALID_TYPE', message: '售后类型无效' };
+  }
+  if (!reason?.trim()) {
+    return { error: 'REASON_REQUIRED', message: '请填写售后原因' };
+  }
+
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+  if (!['SHIPPED', 'COMPLETED'].includes(order.status)) {
+    return { error: 'INVALID_STATE', message: '仅已发货或已完成订单可申请售后' };
+  }
+
+  const existing = await afterSaleRepo.listByOrderId(orderId);
+  const hasOpen = existing.some((a) =>
+    ['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING'].includes(a.status),
+  );
+  if (hasOpen) {
+    return { error: 'ALREADY_EXISTS', message: '该订单已有进行中的售后' };
+  }
+
+  let sub = null;
+  if (subOrderId) {
+    sub = order.subOrders.find((s) => s.subOrderId === Number(subOrderId));
+    if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+  } else {
+    sub = order.subOrders.find((s) => ['SHIPPED', 'COMPLETED'].includes(s.status)) || order.subOrders[0];
+  }
+  if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+
+  const now = new Date();
+  const merchantDeadline = new Date(now.getTime() + MERCHANT_AFTER_SALE_HOURS * 60 * 60 * 1000);
+  const created = await afterSaleRepo.create({
+    orderId: order.orderId,
+    orderNo: order.orderNo,
+    subOrderId: sub.subOrderId,
+    userId,
+    merchantId: sub.merchantId,
+    shopName: sub.shopName,
+    type,
+    reason: reason.trim(),
+    status: 'APPLIED',
+    appliedAt: now,
+    merchantDeadline,
+    items: sub.items,
+  });
+
+  await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
+  await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDING');
+
+  return { afterSale: afterSaleRepo.serialize(created) };
+}
+
+/** 领域规则：APPLIED/REJECTED → ESCALATED（用户申请平台介入） */
+export async function escalateAfterSale(userId, orderId, afterSaleId) {
+  await expirePendingOrders();
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item || item.orderId !== orderId || item.userId !== userId) {
+    return { error: 'NOT_FOUND', message: '售后单不存在' };
+  }
+  if (!['APPLIED', 'REJECTED'].includes(item.status)) {
+    return { error: 'INVALID_STATE', message: '当前售后状态不可申请平台介入' };
+  }
+
+  const updated = await afterSaleRepo.escalate(afterSaleId, new Date());
+  if (order.status !== 'REFUNDING') {
+    await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
+  }
+  return { afterSale: afterSaleRepo.serialize(updated) };
 }
 
 export async function getAdminOrders({ orderNo, userId, merchantId, status, page = 1, pageSize = 20 } = {}) {

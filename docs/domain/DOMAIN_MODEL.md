@@ -64,6 +64,10 @@ erDiagram
 #### Address（收货地址）
 - **属性**：`id`, `userId`, `receiverName`, `phone`, `province`, `city`, `district`, `detail`, `isDefault`
 
+#### Favorite（商品收藏）
+- **属性**：`id`, `userId`, `spuId`, `createdAt`
+- **不变式**：同一用户对同一 SPU 仅可收藏一次；仅本人可读写
+
 #### SPU / SKU / Stock
 - **SPU**：`id`, `shopId`, `categoryId`, `title`, `description`, `mainImage`, `status`（见商品审核状态机）
 - **SKU**：`id`, `spuId`, `specJson`, `price`
@@ -228,6 +232,7 @@ stateDiagram-v2
 | users | 用户 | 成员 A |
 | addresses | 收货地址 | 成员 A |
 | cart_items | 购物车 | 成员 A |
+| favorites | 商品收藏 | 成员 A |
 | merchants | 商家 | 成员 B |
 | shops | 店铺 | 成员 B |
 | categories | 类目 | 成员 B |

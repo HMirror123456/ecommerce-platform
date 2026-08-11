@@ -7,13 +7,19 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref('');
   const userId = ref(null);
   const phone = ref('');
+  const nickname = ref('');
 
   const isLoggedIn = computed(() => Boolean(token.value));
 
   function persist() {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ token: token.value, userId: userId.value, phone: phone.value }),
+      JSON.stringify({
+        token: token.value,
+        userId: userId.value,
+        phone: phone.value,
+        nickname: nickname.value,
+      }),
     );
   }
 
@@ -25,6 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = data.token || '';
       userId.value = data.userId ?? null;
       phone.value = data.phone || '';
+      nickname.value = data.nickname || '';
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }
@@ -34,6 +41,14 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = data.token;
     userId.value = data.userId;
     phone.value = loginPhone;
+    nickname.value = data.nickname || '';
+    persist();
+  }
+
+  function setProfile(profile) {
+    if (profile?.userId != null) userId.value = profile.userId;
+    if (profile?.phone) phone.value = profile.phone;
+    if (profile?.nickname !== undefined) nickname.value = profile.nickname || '';
     persist();
   }
 
@@ -41,8 +56,19 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = '';
     userId.value = null;
     phone.value = '';
+    nickname.value = '';
     localStorage.removeItem(STORAGE_KEY);
   }
 
-  return { token, userId, phone, isLoggedIn, setSession, logout, loadStored };
+  return {
+    token,
+    userId,
+    phone,
+    nickname,
+    isLoggedIn,
+    setSession,
+    setProfile,
+    logout,
+    loadStored,
+  };
 });

@@ -31,6 +31,18 @@ function toIso(value) {
   return String(value);
 }
 
+/**
+ * MySQL DATETIME(3) 友好格式（严格模式不接受 ISO 的 T/Z）。
+ * 使用 UTC 组件写入，与 pool.timezone='Z'、超时判断 UTC_TIMESTAMP(3) 一致。
+ */
+function toMysqlDateTime(value) {
+  if (value == null || value === '') return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n, len = 2) => String(n).padStart(len, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`;
+}
+
 export function mapAdminRow(row) {
   if (!row) return null;
   return {
@@ -81,4 +93,4 @@ export function mapProductAuditRow(row) {
   };
 }
 
-export { toIso };
+export { toIso, toMysqlDateTime };

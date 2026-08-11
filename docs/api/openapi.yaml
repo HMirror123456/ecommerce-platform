@@ -5,7 +5,7 @@ info:
     3 人小组项目共用接口契约。修改接口请先改本文档，再实现前后端。
     业务术语见 docs/BUSINESS_GLOSSARY.md，状态机见 docs/domain/DOMAIN_MODEL.md
     管理后台见 docs/domain/ADMIN.md
-  version: 0.2.0
+  version: 0.2.1
 
 servers:
   - url: http://localhost:8080/api
@@ -91,6 +91,168 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminAuthResponse'
 
+  # ========== User / Address (C端) ==========
+  /users/me:
+    get:
+      tags: [user]
+      summary: 获取当前用户资料
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: 未登录
+    put:
+      tags: [user]
+      summary: 更新当前用户资料
+      description: |
+        可修改昵称；可选修改密码（需同时提供 currentPassword 与 newPassword）。
+        手机号不可修改。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserProfileRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: 参数无效
+        '401':
+          description: 未登录或当前密码错误
+
+  /addresses:
+    get:
+      tags: [user]
+      summary: 获取当前用户收货地址列表
+      description: 按默认地址优先、id 升序返回。仅本人可访问。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Address'
+        '401':
+          description: 未登录
+    post:
+      tags: [user]
+      summary: 新增收货地址
+      description: |
+        若 `isDefault=true` 或用户尚无地址，则设为默认并取消其他默认。
+        下单时使用返回的 `id` 作为 `POST /orders` 的 `addressId`。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAddressRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '400':
+          description: 参数无效
+        '401':
+          description: 未登录
+
+  /addresses/{addressId}:
+    put:
+      tags: [user]
+      summary: 修改收货地址
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: addressId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAddressRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '400':
+          description: 参数无效
+        '401':
+          description: 未登录
+        '404':
+          description: 地址不存在
+    delete:
+      tags: [user]
+      summary: 删除收货地址
+      description: 若删除的是默认地址且仍有其他地址，将最早一条剩余地址设为默认。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: addressId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: No Content
+        '401':
+          description: 未登录
+        '404':
+          description: 地址不存在
+
+  /addresses/{addressId}/default:
+    put:
+      tags: [user]
+      summary: 设为默认收货地址
+      description: 将指定地址设为默认，并取消该用户其他地址的默认状态。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: addressId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          description: 未登录
+        '404':
+          description: 地址不存在
+
   # ========== Product (C端) ==========
   /categories:
     get:
@@ -150,6 +312,90 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductDetail'
+
+  # ========== Favorites ==========
+  /favorites:
+    get:
+      tags: [user]
+      summary: 我的收藏列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FavoriteItem'
+    post:
+      tags: [user]
+      summary: 收藏商品（SPU）
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spuId]
+              properties:
+                spuId:
+                  type: integer
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FavoriteItem'
+        '404':
+          description: 商品不存在或未上架
+        '409':
+          description: 已收藏
+
+  /favorites/{spuId}:
+    get:
+      tags: [user]
+      summary: 查询某商品是否已收藏
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spuId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spuId:
+                    type: integer
+                  favorited:
+                    type: boolean
+    delete:
+      tags: [user]
+      summary: 取消收藏
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spuId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: 未收藏该商品
 
   # ========== Cart ==========
   /cart/items:
@@ -335,6 +581,8 @@ paths:
     post:
       tags: [order]
       summary: 创建订单（从购物车或直接购买）
+      description: |
+        创建成功后，将从当前用户购物车中移除本次下单涉及的 SKU。
       security:
         - bearerAuth: []
       requestBody:
@@ -1086,6 +1334,123 @@ components:
           type: string
         userId:
           type: integer
+        nickname:
+          type: string
+          nullable: true
+
+    UserProfile:
+      type: object
+      properties:
+        userId:
+          type: integer
+        phone:
+          type: string
+        nickname:
+          type: string
+          nullable: true
+
+    FavoriteItem:
+      type: object
+      properties:
+        favoriteId:
+          type: integer
+        spuId:
+          type: integer
+        title:
+          type: string
+        mainImage:
+          type: string
+          nullable: true
+        minPrice:
+          type: number
+          nullable: true
+        shopName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          description: 商品当前状态；下架/不存在时仍可在收藏中展示
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdateUserProfileRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+          description: 昵称
+        currentPassword:
+          type: string
+          format: password
+          description: 修改密码时必填
+        newPassword:
+          type: string
+          format: password
+          description: 新密码，至少 6 位；与 currentPassword 同时提供
+
+    Address:
+      type: object
+      description: 收货地址（对齐 DOMAIN_MODEL Address）
+      properties:
+        id:
+          type: integer
+          description: 地址 ID，下单时作为 addressId
+        userId:
+          type: integer
+        receiverName:
+          type: string
+        phone:
+          type: string
+        province:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        detail:
+          type: string
+        isDefault:
+          type: boolean
+
+    CreateAddressRequest:
+      type: object
+      required: [receiverName, phone, province, city, district, detail]
+      properties:
+        receiverName:
+          type: string
+        phone:
+          type: string
+        province:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        detail:
+          type: string
+        isDefault:
+          type: boolean
+          default: false
+
+    UpdateAddressRequest:
+      type: object
+      required: [receiverName, phone, province, city, district, detail]
+      properties:
+        receiverName:
+          type: string
+        phone:
+          type: string
+        province:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        detail:
+          type: string
+        isDefault:
+          type: boolean
 
     AdminLoginRequest:
       type: object

@@ -1,4 +1,4 @@
-import pool, { mapApplicationRow } from '../db/pool.js';
+import pool, { mapApplicationRow, toMysqlDateTime } from '../db/pool.js';
 import * as merchantRepo from './merchantRepo.js';
 
 const APPLICATION_SELECT = `
@@ -86,7 +86,7 @@ export async function insertApplication({ shopName, contactName, contactPhone, a
   const [result] = await pool.query(
     `INSERT INTO merchant_applications (shop_name, contact_name, contact_phone, status, applied_at)
      VALUES (?, ?, ?, 'PENDING', ?)`,
-    [shopName, contactName, contactPhone, appliedAt],
+    [shopName, contactName, contactPhone, toMysqlDateTime(appliedAt)],
   );
   return findById(result.insertId);
 }
@@ -111,7 +111,7 @@ export async function auditApplication(applicationId, adminId, approved, reason)
       return { error: 'NOT_FOUND', message: '入驻申请不存在或已处理' };
     }
 
-    const auditedAt = new Date();
+    const auditedAt = toMysqlDateTime(new Date());
     const shopName = row.shop_name;
     if (approved) {
       const merchantId = await merchantRepo.getNextMerchantId(conn);

@@ -37,6 +37,29 @@ export async function findByPhone(phone, password) {
   };
 }
 
+export async function findByPhoneOnly(phone) {
+  const [rows] = await pool.query(
+    'SELECT id, phone, password, nickname FROM users WHERE phone = ? LIMIT 1',
+    [phone],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    phone: row.phone,
+    password: row.password,
+    nickname: row.nickname,
+  };
+}
+
+export async function createUser({ phone, password, nickname }) {
+  const [result] = await pool.query(
+    'INSERT INTO users (phone, password, nickname) VALUES (?, ?, ?)',
+    [phone, password, nickname || null],
+  );
+  return findById(result.insertId);
+}
+
 export async function findById(id) {
   const [rows] = await pool.query(
     'SELECT id, phone, password, nickname FROM users WHERE id = ? LIMIT 1',
@@ -51,6 +74,23 @@ export async function findById(id) {
     nickname: row.nickname,
     addresses: await loadAddresses(row.id),
   };
+}
+
+export async function updateProfile(userId, { nickname, password }) {
+  const sets = [];
+  const params = [];
+  if (nickname !== undefined) {
+    sets.push('nickname = ?');
+    params.push(nickname);
+  }
+  if (password !== undefined) {
+    sets.push('password = ?');
+    params.push(password);
+  }
+  if (!sets.length) return findById(userId);
+  params.push(userId);
+  await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+  return findById(userId);
 }
 
 export async function findAddressById(userId, addressId) {
@@ -203,6 +243,17 @@ export async function updateCartItemQuantity(itemId, quantity) {
 
 export async function deleteCartItem(itemId) {
   await pool.query('DELETE FROM cart_items WHERE id = ?', [itemId]);
+}
+
+/** 下单成功后清除购物车中已购买的 SKU */
+export async function deleteCartItemsBySkuIds(userId, skuIds) {
+  const ids = [...new Set((skuIds || []).map(Number).filter((id) => id > 0))];
+  if (!ids.length) return;
+  const placeholders = ids.map(() => '?').join(',');
+  await pool.query(
+    `DELETE FROM cart_items WHERE user_id = ? AND sku_id IN (${placeholders})`,
+    [userId, ...ids],
+  );
 }
 
 export { toIso };

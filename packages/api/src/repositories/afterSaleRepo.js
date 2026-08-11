@@ -1,4 +1,4 @@
-import pool, { toIso } from '../db/pool.js';
+import pool, { toIso, toMysqlDateTime } from '../db/pool.js';
 
 function mapRow(row) {
   let items = row.items;
@@ -32,6 +32,59 @@ function mapRow(row) {
 export async function findById(afterSaleId) {
   const [rows] = await pool.query('SELECT * FROM after_sales WHERE after_sale_id = ? LIMIT 1', [afterSaleId]);
   return rows[0] ? mapRow(rows[0]) : null;
+}
+
+export async function listByOrderId(orderId) {
+  const [rows] = await pool.query(
+    'SELECT * FROM after_sales WHERE order_id = ? ORDER BY applied_at DESC',
+    [orderId],
+  );
+  return rows.map(mapRow);
+}
+
+export async function create({
+  orderId,
+  orderNo,
+  subOrderId,
+  userId,
+  merchantId,
+  shopName,
+  type,
+  reason,
+  status,
+  appliedAt,
+  merchantDeadline,
+  items,
+}) {
+  const [result] = await pool.query(
+    `INSERT INTO after_sales (
+      order_id, order_no, sub_order_id, user_id, merchant_id, shop_name,
+      type, reason, status, applied_at, merchant_deadline, items
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      orderId,
+      orderNo,
+      subOrderId,
+      userId,
+      merchantId,
+      shopName,
+      type,
+      reason,
+      status,
+      toMysqlDateTime(appliedAt),
+      toMysqlDateTime(merchantDeadline),
+      JSON.stringify(items || []),
+    ],
+  );
+  return findById(result.insertId);
+}
+
+export async function escalate(afterSaleId, escalatedAt) {
+  await pool.query(
+    `UPDATE after_sales SET status = 'ESCALATED', escalated_at = ? WHERE after_sale_id = ?`,
+    [toMysqlDateTime(escalatedAt), afterSaleId],
+  );
+  return findById(afterSaleId);
 }
 
 export async function listByMerchant(merchantId, status) {
@@ -73,7 +126,7 @@ export async function countByStatus(status) {
 export async function updateAudit(afterSaleId, { status, auditReason, auditedAt }) {
   await pool.query(
     'UPDATE after_sales SET status = ?, audit_reason = ?, audited_at = ? WHERE after_sale_id = ?',
-    [status, auditReason, auditedAt, afterSaleId],
+    [status, auditReason, toMysqlDateTime(auditedAt), afterSaleId],
   );
   return findById(afterSaleId);
 }

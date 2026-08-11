@@ -8,11 +8,16 @@
 
 ## 已实现功能
 
-- 用户登录（手机号 + 密码）
-- 购物车（增删查改、去结算）
-- 收货地址管理（增删查改、设默认）
-- 确认订单（选地址、立即购买 / 购物车结算）
-- Mock 支付页（15 分钟倒计时、支付/取消）
+- 用户注册 / 登录（手机号 + 密码）
+- 个人中心（资料编辑、修改密码、我的订单、我的收藏、收货地址）
+- 商品收藏（详情页收藏/取消；个人中心管理）
+- 商品列表（分类筛选、分页）
+- 商品详情（SKU 规格、加购、立即购买）
+- 购物车（改数量、删除、去结算；下单后清除已购 SKU）
+- 结算下单（立即购买 / 购物车）
+- Mock 支付（倒计时、支付/取消）
+- 订单列表 / 详情
+- 售后申请（SHIPPED/COMPLETED → REFUNDING）与申请平台介入（→ ESCALATED）
 
 ## 启动方式
 
@@ -35,50 +40,37 @@ npm run dev
 
 ## 演示流程
 
-1. 登录：`13800138000` / `123456`
-2. 购物车：访问 `/cart`，或通过 API 加购 SKU `1001`
-3. 地址管理：`/addresses` 新增/编辑/删除/设默认
-4. 结算：
-   - 购物车：`/cart` → 去结算
-   - 立即购买：`/checkout?spuId=101&skuId=1001&quantity=1`
-5. 提交订单 → 支付页 Mock 支付
-6. 商家端验证：`merchant1/123456` 查看待发货订单
+1. 注册新账号，或使用演示账号登录：`13800138000` / `123456`
+2. 商品详情 → 加入购物车 → 购物车结算 → Mock 支付
+3. 或详情页「立即购买」直达结算
+4. 「我的订单」查看状态；已发货/已完成订单可申请售后，拒绝后可申请平台介入
+5. 商家端验证：`merchant1/123456` 查看待发货与售后
 
 ## 主要页面
 
 | 路由 | 说明 |
 |------|------|
-| `/login` | 用户登录 |
+| `/login` `/register` | 登录 / 注册 |
+| `/products` `/products/:spuId` | 商品列表 / 详情 |
 | `/cart` | 购物车 |
-| `/addresses` | 收货地址管理 |
-| `/checkout` | 确认订单（`?from=cart` 从购物车） |
-| `/orders/:orderId/pay` | 订单支付 |
+| `/checkout` | 确认订单 |
+| `/user` | 个人中心 · 个人信息 |
+| `/user/orders` | 个人中心 · 我的订单 |
+| `/user/favorites` | 个人中心 · 我的收藏 |
+| `/user/addresses` | 个人中心 · 收货地址 |
+| `/orders/:orderId` `/orders/:orderId/pay` | 订单详情 / 支付 |
 
-## API 对接
+## 目录结构
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/auth/user/login` | 登录 |
-| GET/POST | `/cart/items` | 购物车列表/加购 |
-| PUT/DELETE | `/cart/items/:itemId` | 改数量/删除 |
-| GET/POST | `/users/addresses` | 地址列表/新增 |
-| PUT/DELETE | `/users/addresses/:id` | 修改/删除 |
-| PATCH | `/users/addresses/:id/default` | 设默认 |
-| POST | `/orders` | 创建订单 |
-
-所有接口需 `Authorization: Bearer <user token>`（登录接口除外）。
-
-## 联调脚本
-
-```bash
-node scripts/verify-cart-address.mjs
+```text
+src/
+  api/          client.js, auth.js, product.js, cart.js, address.js, order.js
+  layouts/      UserLayout.vue
+  router/       index.js
+  stores/       auth.js
+  styles/       global.css
+  views/        Login/Register/Product*/Cart/Address/Checkout/Order*/Payment
 ```
-
-## 当前限制
-
-- 用户注册接口未实现
-- 商品列表/详情页待下一批 P0
-- 购物车/地址为内存存储，重启 API 后清空（用户 seed 地址保留）
 
 ## Cursor 开发
 

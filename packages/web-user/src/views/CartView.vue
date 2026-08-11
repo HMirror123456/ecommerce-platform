@@ -80,9 +80,7 @@ onMounted(loadCart);
 
     <el-card shadow="never">
       <el-empty v-if="!loading && items.length === 0" description="购物车是空的">
-        <el-button type="primary" @click="router.push({ name: 'checkout', query: { spuId: 101, skuId: 1001, quantity: 1 } })">
-          立即购买演示商品
-        </el-button>
+        <el-button type="primary" @click="router.push({ name: 'products' })">去逛逛</el-button>
       </el-empty>
 
       <el-table v-else :data="items" stripe>
