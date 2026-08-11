@@ -27,3 +27,9 @@ export function applyAfterSale(orderId, payload) {
 export function escalateAfterSale(orderId, afterSaleId) {
   return client.post(`/orders/${orderId}/after-sales/${afterSaleId}/escalate`).then((r) => r.data);
 }
+
+export function submitAfterSaleReturn(orderId, afterSaleId, payload) {
+  return client
+    .post(`/orders/${orderId}/after-sales/${afterSaleId}/return`, payload)
+    .then((r) => r.data);
+}

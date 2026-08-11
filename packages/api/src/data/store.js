@@ -301,7 +301,7 @@ export async function escalateOverdueAfterSales() {
 }
 
 /**
- * 领域规则：同意售后 → REFUNDED（Demo：退货退款视为验收通过直接退款）；
+ * 领域规则：同意售后收尾 → REFUNDED；
  * AfterSaleRefunded：订单 REFUNDED，库存 available += quantity
  */
 async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
@@ -330,6 +330,23 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
   return { afterSale: afterSaleRepo.serialize(updated) };
 }
 
+/**
+ * 领域规则：
+ * - REFUND_ONLY：同意 → 直接 REFUNDED
+ * - RETURN_REFUND：同意 → APPROVED，等待用户寄回
+ */
+async function approveAfterSale(item, { auditReason = null } = {}) {
+  if (item.type === 'RETURN_REFUND') {
+    const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
+      status: 'APPROVED',
+      auditReason: auditReason || '同意退货退款，请用户寄回商品',
+      auditedAt: new Date(),
+    });
+    return { afterSale: afterSaleRepo.serialize(updated) };
+  }
+  return finalizeApprovedAfterSale(item, { auditReason });
+}
+
 /** 领域规则：售后拒绝关闭 → 订单退出 REFUNDING，恢复 SHIPPED */
 async function closeRejectedAfterSale(item, reason) {
   const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
@@ -348,6 +365,50 @@ async function closeRejectedAfterSale(item, reason) {
     }
   }
   return { afterSale: afterSaleRepo.serialize(updated) };
+}
+
+/** 领域规则：APPROVED + RETURN_REFUND → RETURNING（用户寄回） */
+export async function submitAfterSaleReturn(userId, orderId, afterSaleId, { logisticsCompany, trackingNo } = {}) {
+  await expirePendingOrders();
+  if (!logisticsCompany?.trim() || !trackingNo?.trim()) {
+    return { error: 'INVALID_INPUT', message: '请填写物流公司与运单号' };
+  }
+
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item || item.orderId !== Number(orderId) || item.userId !== userId) {
+    return { error: 'NOT_FOUND', message: '售后单不存在' };
+  }
+  if (item.type !== 'RETURN_REFUND') {
+    return { error: 'INVALID_STATE', message: '仅退货退款售后需要寄回物流' };
+  }
+  if (item.status !== 'APPROVED') {
+    return { error: 'INVALID_STATE', message: '当前售后状态不允许填写寄回物流' };
+  }
+
+  const returnShipment = {
+    logisticsCompany: logisticsCompany.trim(),
+    trackingNo: trackingNo.trim(),
+    shippedAt: new Date().toISOString(),
+  };
+  const updated = await afterSaleRepo.updateReturnShipment(afterSaleId, {
+    status: 'RETURNING',
+    returnShipment,
+  });
+  return { afterSale: afterSaleRepo.serialize(updated) };
+}
+
+/** 领域规则：RETURNING → REFUNDED（商家验收） */
+export async function confirmAfterSaleReturn(merchantId, afterSaleId) {
+  await expirePendingOrders();
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+  if (item.merchantId !== merchantId) return { error: 'FORBIDDEN', message: '无权处理该售后单' };
+  if (item.status !== 'RETURNING') {
+    return { error: 'INVALID_STATE', message: '仅退货中（RETURNING）售后可验收退款' };
+  }
+  return finalizeApprovedAfterSale(item, {
+    auditReason: item.auditReason || '商家验收通过，已退款',
+  });
 }
 
 export async function findAdmin(username, password) {
@@ -1191,14 +1252,14 @@ export async function auditMerchantAfterSale(merchantId, afterSaleId, { approved
   }
 
   if (approved) {
-    return finalizeApprovedAfterSale(item, {
+    return approveAfterSale(item, {
       auditReason: reason?.trim() || '商家同意售后',
     });
   }
   return closeRejectedAfterSale(item, reason);
 }
 
-/** 领域规则：ESCALATED → APPROVED/REJECTED（平台 CS_AGENT 仲裁）；同意后闭环到 REFUNDED */
+/** 领域规则：ESCALATED → 同意/拒绝；REFUND_ONLY 直接退款，RETURN_REFUND 停在 APPROVED */
 export async function arbitrateAfterSale(afterSaleId, { approved, reason } = {}) {
   await expirePendingOrders();
   if (typeof approved !== 'boolean') {
@@ -1215,7 +1276,7 @@ export async function arbitrateAfterSale(afterSaleId, { approved, reason } = {})
   }
 
   if (approved) {
-    return finalizeApprovedAfterSale(item, {
+    return approveAfterSale(item, {
       auditReason: reason?.trim() || '平台仲裁同意',
     });
   }

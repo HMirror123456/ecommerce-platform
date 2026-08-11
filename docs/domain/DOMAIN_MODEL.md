@@ -205,8 +205,12 @@ stateDiagram-v2
 | 已同意 | APPROVED | 进入退款或退货流程 |
 | 已拒绝 | REJECTED | 商家或平台拒绝 |
 | 已升级 | ESCALATED | 待平台客服仲裁 |
-| 退货中 | RETURNING | 用户已寄回 |
+| 退货中 | RETURNING | 用户已寄回，待商家验收 |
 | 已退款 | REFUNDED | 退款完成，订单 → REFUNDED，库存回滚 |
+
+**Demo 约定：**
+- `REFUND_ONLY`：商家/平台同意后直接 `REFUNDED`
+- `RETURN_REFUND`：同意后停在 `APPROVED`，用户填写寄回物流 → `RETURNING`，商家验收 → `REFUNDED`
 
 ---
 

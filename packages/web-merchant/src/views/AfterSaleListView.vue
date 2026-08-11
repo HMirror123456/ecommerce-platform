@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { auditAfterSale, getAfterSales } from '@/api/merchant';
+import { auditAfterSale, confirmAfterSaleReturn, getAfterSales } from '@/api/merchant';
 
 const AFTER_SALE_STATUS_OPTIONS = [
   { label: '待商家处理', value: 'APPLIED', type: 'warning' },
@@ -115,7 +115,12 @@ function resetFilters() {
 async function approve(row) {
   if (!row?.afterSaleId || processingId.value) return;
   try {
-    await ElMessageBox.confirm('确认同意该售后申请？', '同意售后', {
+    await ElMessageBox.confirm(
+      row.type === 'RETURN_REFUND'
+        ? '确认同意该退货退款申请？同意后需等待用户寄回商品。'
+        : '确认同意该仅退款申请？同意后将直接退款。',
+      '同意售后',
+      {
       confirmButtonText: '同意',
       cancelButtonText: '取消',
       type: 'warning',
@@ -165,6 +170,30 @@ async function reject(row) {
   }
 }
 
+async function confirmReturn(row) {
+  if (!row?.afterSaleId || processingId.value) return;
+  try {
+    await ElMessageBox.confirm(
+      '确认已收到退货并完成验收？确认后将退款并回滚库存。',
+      '验收通过并退款',
+      { confirmButtonText: '确认退款', cancelButtonText: '取消', type: 'warning' },
+    );
+  } catch {
+    return;
+  }
+
+  processingId.value = row.afterSaleId;
+  try {
+    const data = await confirmAfterSaleReturn(row.afterSaleId);
+    ElMessage.success(data?.message || '验收通过，已退款');
+    await loadAfterSales();
+  } catch (e) {
+    ElMessage.error(e.message || '验收失败');
+  } finally {
+    processingId.value = null;
+  }
+}
+
 onMounted(loadAfterSales);
 </script>
 
@@ -174,7 +203,7 @@ onMounted(loadAfterSales);
       <div class="card-header">
         <div>
           <div class="title">售后处理</div>
-          <div class="description">处理待商家审核的售后申请，平台仲裁单仅展示</div>
+          <div class="description">处理待审售后；退货中可验收退款；已同意退货请等待用户寄回</div>
         </div>
       </div>
     </template>
@@ -233,15 +262,36 @@ onMounted(loadAfterSales);
       <el-table-column label="处理截止" width="170">
         <template #default="{ row }">{{ formatTime(row.merchantDeadline) }}</template>
       </el-table-column>
+      <el-table-column label="寄回物流" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.returnShipment">
+            {{ row.returnShipment.logisticsCompany }} {{ row.returnShipment.trackingNo }}
+          </span>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="处理原因" min-width="160" show-overflow-tooltip>
         <template #default="{ row }">{{ row.auditReason || row.rejectReason || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <template v-if="row.status === 'APPLIED'">
             <el-button link type="success" :loading="processingId === row.afterSaleId" @click="approve(row)">同意</el-button>
             <el-button link type="danger" :disabled="!!processingId" @click="reject(row)">拒绝</el-button>
           </template>
+          <template v-else-if="row.status === 'RETURNING'">
+            <el-button
+              link
+              type="primary"
+              :loading="processingId === row.afterSaleId"
+              @click="confirmReturn(row)"
+            >
+              验收通过并退款
+            </el-button>
+          </template>
+          <span v-else-if="row.status === 'APPROVED' && row.type === 'RETURN_REFUND'" class="muted">
+            等待用户寄回
+          </span>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>

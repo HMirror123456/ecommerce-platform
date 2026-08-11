@@ -712,6 +712,40 @@ paths:
         '200':
           description: OK
 
+  /orders/{orderId}/after-sales/{afterSaleId}/return:
+    post:
+      tags: [order]
+      summary: 用户填写退货寄回物流（APPROVED → RETURNING）
+      description: 仅 RETURN_REFUND 且 status=APPROVED 时可调用
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnShipmentRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AfterSale'
+        '409':
+          description: 当前状态不允许寄回
+
   # ========== Merchant ==========
   /merchant/applications:
     post:
@@ -1030,6 +1064,29 @@ paths:
       responses:
         '200':
           description: OK
+
+  /merchant/after-sales/{afterSaleId}/confirm-return:
+    post:
+      tags: [merchant]
+      summary: 商家验收退货并退款（RETURNING → REFUNDED）
+      description: 用户已寄回后，商家确认收货并完成退款与库存回滚
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AfterSale'
+        '409':
+          description: 当前状态不允许验收
 
   # ========== Admin ==========
   /admin/dashboard/summary:
@@ -1631,6 +1688,26 @@ components:
         reason:
           type: string
 
+    ReturnShipmentRequest:
+      type: object
+      required: [logisticsCompany, trackingNo]
+      properties:
+        logisticsCompany:
+          type: string
+        trackingNo:
+          type: string
+
+    ReturnShipment:
+      type: object
+      properties:
+        logisticsCompany:
+          type: string
+        trackingNo:
+          type: string
+        shippedAt:
+          type: string
+          format: date-time
+
     AfterSale:
       type: object
       properties:
@@ -1663,6 +1740,12 @@ components:
           format: date-time
         auditReason:
           type: string
+        auditedAt:
+          type: string
+          format: date-time
+        returnShipment:
+          $ref: '#/components/schemas/ReturnShipment'
+          description: 用户寄回物流；RETURNING/REFUNDED 时可能有值
         items:
           type: array
           items:

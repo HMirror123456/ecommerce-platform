@@ -76,13 +76,15 @@ function onTabChange() {
 async function handleApprove(row) {
   try {
     await ElMessageBox.confirm(
-      `确认同意工单 #${row.afterSaleId}？同意后将完成退款（订单 → REFUNDED，库存回滚）。`,
+      `确认同意工单 #${row.afterSaleId}？仅退款将直接退款；退货退款将等待用户寄回。`,
       '平台仲裁同意',
-      { type: 'success', confirmButtonText: '同意退款' },
+      { type: 'success', confirmButtonText: '同意' },
     );
     actionLoading.value = true;
-    await arbitrateAfterSale(row.afterSaleId, true, '平台仲裁同意');
-    ElMessage.success('已裁定同意，售后已退款');
+    const result = await arbitrateAfterSale(row.afterSaleId, true, '平台仲裁同意');
+    ElMessage.success(
+      result?.status === 'APPROVED' ? '已同意，等待用户寄回' : '已裁定同意，售后已退款',
+    );
     await loadList();
   } catch (e) {
     if (e !== 'cancel' && e?.message) ElMessage.error(e.message);

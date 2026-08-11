@@ -59,3 +59,7 @@ export function getAfterSales(params) {
 export function auditAfterSale(afterSaleId, data) {
   return client.post(`/merchant/after-sales/${afterSaleId}/audit`, data).then((r) => r.data);
 }
+
+export function confirmAfterSaleReturn(afterSaleId) {
+  return client.post(`/merchant/after-sales/${afterSaleId}/confirm-return`).then((r) => r.data);
+}

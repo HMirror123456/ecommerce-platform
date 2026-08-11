@@ -1,14 +1,30 @@
 import pool, { toIso, toMysqlDateTime } from '../db/pool.js';
 
-function mapRow(row) {
-  let items = row.items;
-  if (typeof items === 'string') {
+function parseJsonField(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
     try {
-      items = JSON.parse(items);
+      return JSON.parse(value);
     } catch {
-      items = [];
+      return fallback;
     }
   }
+  return fallback;
+}
+
+function mapReturnShipment(raw) {
+  const shipment = parseJsonField(raw, null);
+  if (!shipment || typeof shipment !== 'object') return null;
+  return {
+    logisticsCompany: shipment.logisticsCompany || '',
+    trackingNo: shipment.trackingNo || '',
+    shippedAt: shipment.shippedAt ? toIso(shipment.shippedAt) || shipment.shippedAt : null,
+  };
+}
+
+function mapRow(row) {
+  const items = parseJsonField(row.items, []);
   return {
     afterSaleId: row.after_sale_id,
     orderId: row.order_id,
@@ -25,6 +41,7 @@ function mapRow(row) {
     auditReason: row.audit_reason || null,
     auditedAt: toIso(row.audited_at),
     escalatedAt: toIso(row.escalated_at),
+    returnShipment: mapReturnShipment(row.return_shipment),
     items: Array.isArray(items) ? items : [],
   };
 }
@@ -159,6 +176,15 @@ export async function updateAudit(afterSaleId, { status, auditReason, auditedAt 
   return findById(afterSaleId);
 }
 
+/** 领域规则：APPROVED → RETURNING，写入寄回物流 */
+export async function updateReturnShipment(afterSaleId, { status, returnShipment }) {
+  await pool.query(
+    `UPDATE after_sales SET status = ?, return_shipment = ? WHERE after_sale_id = ?`,
+    [status, JSON.stringify(returnShipment), afterSaleId],
+  );
+  return findById(afterSaleId);
+}
+
 /** 领域规则：商家 48h 未处理 APPLIED → ESCALATED */
 export async function escalateOverdue(now = new Date()) {
   const [result] = await pool.query(
@@ -185,6 +211,7 @@ export function serialize(item) {
     auditReason: item.auditReason || null,
     auditedAt: item.auditedAt || null,
     escalatedAt: item.escalatedAt || null,
+    returnShipment: item.returnShipment || null,
     orderNo: item.orderNo,
     shopName: item.shopName,
     items: item.items || [],

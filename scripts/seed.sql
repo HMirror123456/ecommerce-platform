@@ -103,37 +103,37 @@ INSERT INTO addresses (id, user_id, receiver_name, phone, province, city, distri
 
 INSERT INTO after_sales (
   after_sale_id, order_id, order_no, sub_order_id, user_id, merchant_id, shop_name,
-  type, reason, status, applied_at, merchant_deadline, audit_reason, audited_at, escalated_at, items
+  type, reason, status, applied_at, merchant_deadline, audit_reason, audited_at, escalated_at, return_shipment, items
 ) VALUES
   (
     1, 10001, 'ORD-DEMO-10001', 50001, 1, 1, '数码旗舰店',
     'REFUND_ONLY', '耳机降噪效果与描述不符，申请仅退款', 'APPLIED',
-    '2026-08-05 08:00:00.000', '2026-08-07 08:00:00.000', NULL, NULL, NULL,
+    '2026-08-05 08:00:00.000', '2026-08-07 08:00:00.000', NULL, NULL, NULL, NULL,
     '[{"skuId":1001,"title":"无线蓝牙耳机 Pro","price":299,"quantity":1}]'
   ),
   (
     2, 10002, 'ORD-DEMO-10002', 50002, 1, 1, '数码旗舰店',
     'RETURN_REFUND', '商品外包装破损，申请退货退款', 'APPROVED',
     '2026-08-04 09:00:00.000', '2026-08-06 09:00:00.000',
-    '同意售后申请，请用户寄回商品', '2026-08-04 10:00:00.000', NULL,
+    '同意售后申请，请用户寄回商品', '2026-08-04 10:00:00.000', NULL, NULL,
     '[{"skuId":1004,"title":"机械键盘 87 键","price":449,"quantity":1}]'
   ),
   (
     3, 10003, 'ORD-DEMO-10003', 50003, 1, 1, '数码旗舰店',
     'REFUND_ONLY', '商家超时未处理，等待平台介入', 'ESCALATED',
     '2026-08-05 10:00:00.000', '2026-08-07 10:00:00.000', NULL, NULL,
-    '2026-08-07 11:00:00.000',
+    '2026-08-07 11:00:00.000', NULL,
     '[{"skuId":1001,"title":"无线蓝牙耳机 Pro","price":299,"quantity":1}]'
   ),
   (
     4, 10004, 'ORD-DEMO-10004', 50004, 1, 2, '家居生活馆',
     'RETURN_REFUND', '台灯灯罩破损，申请退货退款', 'APPLIED',
-    '2026-08-05 11:00:00.000', '2026-08-07 11:00:00.000', NULL, NULL, NULL,
+    '2026-08-05 11:00:00.000', '2026-08-07 11:00:00.000', NULL, NULL, NULL, NULL,
     '[{"skuId":1003,"title":"北欧简约台灯","price":159,"quantity":1}]'
   ),
   (
     5, 10005, 'ORD-DEMO-10005', 50005, 1, 1, '数码旗舰店',
     'RETURN_REFUND', '键盘按键失灵，申请退货退款', 'APPLIED',
-    '2026-08-05 09:30:00.000', '2026-08-07 09:30:00.000', NULL, NULL, NULL,
+    '2026-08-05 09:30:00.000', '2026-08-07 09:30:00.000', NULL, NULL, NULL, NULL,
     '[{"skuId":1004,"title":"机械键盘 87 键","price":449,"quantity":1}]'
   );

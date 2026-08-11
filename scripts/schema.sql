@@ -234,6 +234,7 @@ CREATE TABLE IF NOT EXISTS after_sales (
   audit_reason TEXT NULL,
   audited_at DATETIME(3) NULL,
   escalated_at DATETIME(3) NULL,
+  return_shipment JSON NULL,
   items JSON NOT NULL,
   INDEX idx_after_sales_status (status),
   INDEX idx_after_sales_merchant (merchant_id)

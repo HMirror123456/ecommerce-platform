@@ -63,6 +63,8 @@ stateDiagram-v2
 | 超时阈值 | 商家需在 48h 内处理；超时系统自动标记 `ESCALATED` |
 | 用户申诉 | `APPLIED` 状态下用户可点击「申请平台介入」→ `ESCALATED` |
 | 仲裁主体 | 仅 `CS_AGENT` 可调用 `/admin/after-sales/{id}/arbitrate` |
+| 退货寄回 | `RETURN_REFUND` 同意后为 `APPROVED`；用户 `POST .../return` → `RETURNING`；商家 `confirm-return` → `REFUNDED` |
+| 仅退款 | `REFUND_ONLY` 同意后直接 `REFUNDED`（不经 RETURNING） |
 | 订单联动 | 售后 `REFUNDED` 后，关联订单 → `REFUNDED`；库存 `available += quantity` |
 | 商家拒绝后 | 用户可申诉升级；或直接接受拒绝关闭 |
 
