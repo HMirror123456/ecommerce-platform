@@ -1,5 +1,7 @@
 -- Demo seed (idempotent via DELETE + INSERT for dev reset)
 
+SET FOREIGN_KEY_CHECKS = 0;
+
 DELETE FROM after_sales;
 DELETE FROM payments;
 DELETE FROM order_items;
@@ -34,6 +36,8 @@ ALTER TABLE categories AUTO_INCREMENT = 1;
 ALTER TABLE spus AUTO_INCREMENT = 1;
 ALTER TABLE skus AUTO_INCREMENT = 1;
 ALTER TABLE admins AUTO_INCREMENT = 1;
+
+SET FOREIGN_KEY_CHECKS = 1;
 
 INSERT INTO admins (username, password, role) VALUES
   ('operator', 'operator123', 'OPERATOR'),

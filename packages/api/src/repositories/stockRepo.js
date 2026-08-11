@@ -121,3 +121,21 @@ export async function deductStock(...args) {
   }
   return { ok: true, stock: await getStock(db, skuId) };
 }
+
+/** 售后退款完成：已售出库存回滚到 available（支付后 locked 已扣减，不能用 releaseStock） */
+export async function restoreAvailable(...args) {
+  const { db, skuId, quantity } = resolveDbAndArgs(args);
+  const qty = Number(quantity);
+  if (!Number.isInteger(qty) || qty <= 0) {
+    return { error: 'INVALID_QTY', message: '数量无效' };
+  }
+  const stock = await getStock(db, skuId);
+  if (!stock) return { error: 'SKU_NOT_FOUND', message: 'SKU 不存在' };
+  await db.query(
+    `UPDATE stocks
+     SET available = available + ?, updated_at = NOW(3)
+     WHERE sku_id = ?`,
+    [qty, skuId],
+  );
+  return { ok: true, stock: await getStock(db, skuId) };
+}

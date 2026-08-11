@@ -1188,10 +1188,19 @@ paths:
   /admin/after-sales:
     get:
       tags: [admin]
-      summary: 待仲裁售后列表
+      summary: 售后列表（待仲裁 / 已完成 / 按状态筛选）
       security:
         - bearerAuth: []
       parameters:
+        - name: status
+          in: query
+          description: |
+            售后状态筛选。`ESCALATED` 待仲裁；`REFUNDED`/`REJECTED` 终态；
+            `COMPLETED` 表示已完成（REFUNDED+REJECTED）；不传则默认 `ESCALATED`。
+          schema:
+            type: string
+            enum: [ESCALATED, REFUNDED, REJECTED, COMPLETED]
+            default: ESCALATED
         - name: page
           in: query
           schema:

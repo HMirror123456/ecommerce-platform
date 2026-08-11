@@ -2,11 +2,12 @@ import { Router } from 'express';
 import {
   auditMerchantApplication,
   auditProduct,
+  arbitrateAfterSale,
   getAdminOrderById,
   getAdminOrders,
   getAdminProductDetail,
   getDashboardSummary,
-  getEscalatedAfterSales,
+  getAdminAfterSales,
   getMerchantApplications,
   getPendingMerchants,
   getPendingProducts,
@@ -99,7 +100,26 @@ router.get('/after-sales', requireAdmin(['CS_AGENT']), async (req, res, next) =>
   try {
     const page = Number(req.query.page) || 1;
     const pageSize = Number(req.query.pageSize) || 20;
-    res.json(await getEscalatedAfterSales(page, pageSize));
+    const status = req.query.status || 'ESCALATED';
+    res.json(await getAdminAfterSales({ status, page, pageSize }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/after-sales/:afterSaleId/arbitrate', requireAdmin(['CS_AGENT']), async (req, res, next) => {
+  try {
+    const afterSaleId = Number(req.params.afterSaleId);
+    const { approved, reason } = req.body || {};
+    if (typeof approved !== 'boolean') return res.status(400).json({ message: 'approved 必填' });
+    const result = await arbitrateAfterSale(afterSaleId, { approved, reason });
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    if (result.error === 'REASON_REQUIRED' || result.error === 'INVALID_INPUT') {
+      return res.status(400).json({ message: result.message });
+    }
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.json(result.afterSale);
   } catch (err) {
     next(err);
   }

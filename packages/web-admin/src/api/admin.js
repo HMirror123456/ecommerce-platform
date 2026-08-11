@@ -36,6 +36,16 @@ export function fetchEscalatedAfterSales(params) {
   return client.get('/admin/after-sales', { params }).then((r) => r.data);
 }
 
+export function fetchAdminAfterSales(params) {
+  return client.get('/admin/after-sales', { params }).then((r) => r.data);
+}
+
+export function arbitrateAfterSale(afterSaleId, approved, reason) {
+  return client
+    .post(`/admin/after-sales/${afterSaleId}/arbitrate`, { approved, reason })
+    .then((r) => r.data);
+}
+
 export function fetchPendingMerchants() {
   return client.get('/admin/merchants/pending').then((r) => r.data);
 }

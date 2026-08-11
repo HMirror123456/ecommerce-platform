@@ -10,7 +10,7 @@
 | 商品审核队列 | P0 | 查看待审 SPU、通过/驳回（须填原因） | B：商家提交 `PENDING_AUDIT` | ✅ |
 | 工作台待办数 | P1 | 展示待审商品数、待仲裁售后数 | 审核/售后 API 就绪 | ✅ |
 | 全平台订单查询 | P1 | 按订单号/用户/商家/状态筛选 | 订单数据已有 | ✅ |
-| 售后仲裁 | P1 | 处理 `ESCALATED` 工单，裁定同意/拒绝 | A 申请 + B 超时未审 | ⬜ |
+| 售后仲裁 | P1 | 处理 `ESCALATED` 工单，裁定同意/拒绝 | A 申请 + B 超时未审 | ✅ |
 | 商家入驻审核 | P1 | 审核入驻申请（可简化表单） | B 提交入驻 | ✅ MySQL 持久化 |
 | 类目管理 | P2 | 维护类目树（时间不够可只读） | B 提供类目 API | ⬜ |
 
@@ -100,7 +100,7 @@ sequenceDiagram
 | `/audit/products` | 商品审核 | P0 | Tab：待审核/已审核/全部记录；表格+详情抽屉 |
 | `/dashboard` | 工作台 | P1 | 统计卡片、快捷入口、待办预览（按角色） |
 | `/orders` | 订单查询 | P1 | 筛选+详情，只读 |
-| `/after-sales` | 售后仲裁 | P1 | 仅 ESCALATED 列表 |
+| `/after-sales` | 售后仲裁 | P1 | Tab：待仲裁 / 已完成；待仲裁可裁定 |
 | `/audit/merchants` | 商家审核 | P1 | 入驻申请列表 |
 | `/categories` | 类目管理 | P2 | 树形编辑或只读 |
 
@@ -121,7 +121,7 @@ sequenceDiagram
 | POST | `/admin/products/{spuId}/audit` | OPERATOR | 审核通过/驳回 |
 | GET | `/admin/orders` | OPERATOR, CS_AGENT | 全平台订单（筛选） |
 | GET | `/admin/orders/{orderId}` | OPERATOR, CS_AGENT | 订单详情 |
-| GET | `/admin/after-sales` | CS_AGENT | 待仲裁售后列表 |
+| GET | `/admin/after-sales` | CS_AGENT | 售后列表（status：ESCALATED / COMPLETED 等） |
 | POST | `/admin/after-sales/{id}/arbitrate` | CS_AGENT | 平台裁定 |
 | GET | `/admin/merchants/pending` | OPERATOR | 待审核商家（P1） |
 | POST | `/admin/merchants/{id}/audit` | OPERATOR | 商家审核（P1） |
