@@ -2,7 +2,11 @@
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
-import { fetchMerchantProducts, submitMerchantProductAudit } from '@/api/merchant';
+import {
+  fetchMerchantProducts,
+  offShelfMerchantProduct,
+  submitMerchantProductAudit,
+} from '@/api/merchant';
 
 const PRODUCT_STATUS_OPTIONS = [
   { label: '草稿', value: 'DRAFT', type: 'info' },
@@ -16,6 +20,7 @@ const loading = ref(false);
 const products = ref([]);
 const total = ref(0);
 const submittingSpuId = ref(null);
+const offShelvingSpuId = ref(null);
 const keyword = ref('');
 const categoryFilter = ref('');
 const statusFilter = ref('');
@@ -146,6 +151,48 @@ function getSubmitAuditLabel(status) {
   return status === 'REJECTED' ? '重新提交审核' : '提交审核';
 }
 
+function canEdit(status) {
+  return status === 'DRAFT' || status === 'REJECTED' || status === 'OFF_SHELF';
+}
+
+function canOffShelf(status) {
+  return status === 'ON_SHELF';
+}
+
+function editProduct(row) {
+  if (!row?.spuId || !canEdit(row.status)) return;
+  router.push({ name: 'product-edit', params: { spuId: row.spuId } });
+}
+
+async function confirmOffShelf(row) {
+  if (!row?.spuId || offShelvingSpuId.value) return;
+  if (!canOffShelf(row.status)) {
+    ElMessage.warning('当前商品状态不允许下架');
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm('确认将该商品下架？下架后不会改变审核记录。', '商品下架确认', {
+      confirmButtonText: '确认下架',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+  } catch {
+    return;
+  }
+
+  offShelvingSpuId.value = row.spuId;
+  try {
+    const data = await offShelfMerchantProduct(row.spuId);
+    ElMessage.success(data?.message || '商品已下架');
+    await loadProducts();
+  } catch (e) {
+    ElMessage.error(e.message || '商品下架失败');
+  } finally {
+    offShelvingSpuId.value = null;
+  }
+}
+
 async function confirmSubmitAudit(row) {
   if (!row?.spuId || submittingSpuId.value) return;
   if (!canSubmitAudit(row.status)) {
@@ -273,8 +320,16 @@ onMounted(loadProducts);
       <el-table-column label="提交审核时间" width="180">
         <template #default="{ row }">{{ formatTime(row.submittedAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
+          <el-button
+            v-if="canEdit(row.status)"
+            link
+            type="primary"
+            @click="editProduct(row)"
+          >
+            编辑
+          </el-button>
           <el-button
             v-if="canSubmitAudit(row.status)"
             link
@@ -284,7 +339,16 @@ onMounted(loadProducts);
           >
             {{ getSubmitAuditLabel(row.status) }}
           </el-button>
-          <span v-else class="muted">-</span>
+          <el-button
+            v-if="canOffShelf(row.status)"
+            link
+            type="warning"
+            :loading="offShelvingSpuId === row.spuId"
+            @click="confirmOffShelf(row)"
+          >
+            下架
+          </el-button>
+          <span v-if="!canEdit(row.status) && !canSubmitAudit(row.status) && !canOffShelf(row.status)" class="muted">-</span>
         </template>
       </el-table-column>
     </el-table>

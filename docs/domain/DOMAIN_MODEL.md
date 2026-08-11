@@ -167,7 +167,7 @@ stateDiagram-v2
     DRAFT --> PENDING_AUDIT: 提交审核
     PENDING_AUDIT --> ON_SHELF: 审核通过
     PENDING_AUDIT --> REJECTED: 审核驳回
-    REJECTED --> DRAFT: 修改后重提
+    REJECTED --> PENDING_AUDIT: 修改后重新提交审核
     ON_SHELF --> OFF_SHELF: 下架
     OFF_SHELF --> ON_SHELF: 重新上架需再审或免审
 ```
