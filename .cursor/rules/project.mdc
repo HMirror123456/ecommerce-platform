@@ -14,7 +14,7 @@ alwaysApply: true
 - **商品**：SPU（标准产品）+ SKU（库存单元）。库存挂在 SKU 上。
 - **订单状态**：PENDING_PAYMENT → PAID → PENDING_SHIPMENT → SHIPPED → COMPLETED；可 CANCELLED / REFUNDING / REFUNDED。
 - **售后状态**：APPLIED → APPROVED/REJECTED/ESCALATED → REFUNDED（详见 DOMAIN_MODEL.md）
-- **角色**：User（C 端）、Merchant（商家）、Admin（OPERATOR/CS_AGENT）。接口必须鉴权，禁止越权。
+- **角色**：User（C 端）、Merchant（商家）、Admin（SUPER_ADMIN/OPERATOR/CS_AGENT）。接口必须鉴权，禁止越权。
 - **支付**：Mock 即可，不调真实支付网关。
 
 ## 文档优先级

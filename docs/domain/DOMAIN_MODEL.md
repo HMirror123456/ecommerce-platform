@@ -98,7 +98,12 @@ erDiagram
 - **不变式**：仅 `SHIPPED`/`COMPLETED` 订单可申请（P1 简化为已发货）
 
 #### Admin（平台管理员）
-- **属性**：`id`, `username`, `passwordHash`, `role`（`OPERATOR`/`CS_AGENT`）, `createdAt`
+- **属性**：`id`, `username`, `passwordHash`, `role`（`SUPER_ADMIN`/`OPERATOR`/`CS_AGENT`）, `status`（`ACTIVE`/`DISABLED`）, `createdAt`
+- **不变式**：
+  - `DISABLED` 不可登录；业务接口鉴权时亦拒绝
+  - 至少保留 1 个 `ACTIVE` 的 `SUPER_ADMIN`
+  - 不可禁用自己；不可通过 API 创建或提升为 `SUPER_ADMIN`（仅 seed 预置）
+  - `SUPER_ADMIN` 继承 `OPERATOR` 与 `CS_AGENT` 全部业务权限，并可管理运营/客服账号
 
 #### ProductAudit（商品审核记录）
 - **属性**：`id`, `spuId`, `adminId`, `approved`, `reason`, `auditedAt`

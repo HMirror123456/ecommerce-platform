@@ -67,6 +67,7 @@ router.post('/admin/login', async (req, res) => {
   try {
     const admin = await findAdmin(username, password);
     if (!admin) return res.status(401).json({ message: '账号或密码错误' });
+    if (admin.status === 'DISABLED') return res.status(401).json({ message: '账号已禁用' });
     res.json({ token: signAdminToken(admin), adminId: admin.id, role: admin.role });
   } catch (err) {
     console.error(err);

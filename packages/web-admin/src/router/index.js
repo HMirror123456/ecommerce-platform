@@ -18,6 +18,12 @@ const router = createRouter({
           meta: { title: '工作台' },
         },
         {
+          path: 'admins',
+          name: 'admins',
+          component: () => import('@/views/AdminAccountListView.vue'),
+          meta: { requiresSuperAdmin: true, title: '管理员账号' },
+        },
+        {
           path: 'audit/products',
           name: 'product-audit',
           component: () => import('@/views/ProductAuditView.vue'),
@@ -54,6 +60,9 @@ router.beforeEach((to) => {
   }
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } };
+  }
+  if (to.meta.requiresSuperAdmin && !auth.canManageAdmins) {
+    return '/dashboard';
   }
   if (to.meta.requiresOperator && !auth.isOperator) {
     return '/dashboard';

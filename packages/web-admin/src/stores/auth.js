@@ -19,13 +19,20 @@ export const useAuthStore = defineStore('auth', () => {
   const username = ref(stored?.username || '');
 
   const isLoggedIn = computed(() => !!token.value);
-  const isOperator = computed(() => role.value === 'OPERATOR');
-  const isCsAgent = computed(() => role.value === 'CS_AGENT');
+  const isSuperAdmin = computed(() => role.value === 'SUPER_ADMIN');
+  const isOperator = computed(() => role.value === 'OPERATOR' || role.value === 'SUPER_ADMIN');
+  const isCsAgent = computed(() => role.value === 'CS_AGENT' || role.value === 'SUPER_ADMIN');
+  const canManageAdmins = computed(() => role.value === 'SUPER_ADMIN');
 
   function persist() {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ token: token.value, adminId: adminId.value, role: role.value, username: username.value }),
+      JSON.stringify({
+        token: token.value,
+        adminId: adminId.value,
+        role: role.value,
+        username: username.value,
+      }),
     );
   }
 
@@ -45,5 +52,17 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(STORAGE_KEY);
   }
 
-  return { token, adminId, role, username, isLoggedIn, isOperator, isCsAgent, setSession, logout };
+  return {
+    token,
+    adminId,
+    role,
+    username,
+    isLoggedIn,
+    isSuperAdmin,
+    isOperator,
+    isCsAgent,
+    canManageAdmins,
+    setSession,
+    logout,
+  };
 });

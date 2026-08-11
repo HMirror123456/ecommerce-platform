@@ -39,9 +39,12 @@ ALTER TABLE admins AUTO_INCREMENT = 1;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
-INSERT INTO admins (username, password, role) VALUES
-  ('operator', 'operator123', 'OPERATOR'),
-  ('csagent', 'cs123', 'CS_AGENT');
+INSERT INTO admins (username, password, role, status) VALUES
+  ('superadmin', 'super123', 'SUPER_ADMIN', 'ACTIVE'),
+  ('operator', 'operator123', 'OPERATOR', 'ACTIVE'),
+  ('operator2', 'operator123', 'OPERATOR', 'ACTIVE'),
+  ('csagent', 'cs123', 'CS_AGENT', 'ACTIVE'),
+  ('csagent2', 'cs123', 'CS_AGENT', 'ACTIVE');
 
 INSERT INTO merchants (id, username, password, shop_id, shop_name) VALUES
   (1, 'merchant1', '123456', 1, '数码旗舰店'),
