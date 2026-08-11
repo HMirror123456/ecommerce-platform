@@ -44,6 +44,79 @@ CREATE TABLE IF NOT EXISTS product_audits (
   INDEX idx_product_audits_time (audited_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Batch 2: product base data (categories, SPU, SKU)
+
+CREATE TABLE IF NOT EXISTS categories (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  parent_id INT NULL,
+  name VARCHAR(64) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME(3) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  INDEX idx_categories_parent (parent_id),
+  CONSTRAINT fk_categories_parent
+    FOREIGN KEY (parent_id) REFERENCES categories(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS spus (
+  spu_id INT PRIMARY KEY AUTO_INCREMENT,
+  shop_id INT NOT NULL,
+  shop_name VARCHAR(128) NOT NULL,
+  merchant_id INT NOT NULL,
+  category_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT NOT NULL,
+  main_image VARCHAR(500) NOT NULL,
+  status ENUM('DRAFT', 'PENDING_AUDIT', 'ON_SHELF', 'REJECTED', 'OFF_SHELF') NOT NULL DEFAULT 'DRAFT',
+  submitted_at DATETIME(3) NULL,
+  reject_reason TEXT NULL,
+  created_at DATETIME(3) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  INDEX idx_spus_merchant (merchant_id),
+  INDEX idx_spus_category (category_id),
+  INDEX idx_spus_status (status),
+  CONSTRAINT fk_spus_merchant FOREIGN KEY (merchant_id) REFERENCES merchants(id),
+  CONSTRAINT fk_spus_category FOREIGN KEY (category_id) REFERENCES categories(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS skus (
+  sku_id INT PRIMARY KEY AUTO_INCREMENT,
+  spu_id INT NOT NULL,
+  spec_json JSON NOT NULL,
+  price DECIMAL(12, 2) NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  INDEX idx_skus_spu (spu_id),
+  CONSTRAINT fk_skus_spu FOREIGN KEY (spu_id) REFERENCES spus(spu_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS stocks (
+  sku_id INT PRIMARY KEY,
+  available INT NOT NULL DEFAULT 0,
+  locked INT NOT NULL DEFAULT 0,
+  updated_at DATETIME(3) NOT NULL,
+  CONSTRAINT fk_stocks_sku FOREIGN KEY (sku_id) REFERENCES skus(sku_id) ON DELETE CASCADE,
+  CONSTRAINT chk_stocks_available_non_negative CHECK (available >= 0),
+  CONSTRAINT chk_stocks_locked_non_negative CHECK (locked >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO stocks (sku_id, available, locked, updated_at)
+SELECT
+  s.sku_id,
+  CASE s.sku_id
+    WHEN 1001 THEN 120
+    WHEN 1002 THEN 80
+    WHEN 1003 THEN 50
+    WHEN 1004 THEN 30
+    ELSE 0
+  END AS available,
+  0 AS locked,
+  NOW(3) AS updated_at
+FROM skus s
+LEFT JOIN stocks st ON st.sku_id = s.sku_id
+WHERE st.sku_id IS NULL;
+
 -- Batch 3: users, addresses, cart, orders, payments, after-sales
 
 CREATE TABLE IF NOT EXISTS users (

@@ -42,6 +42,12 @@ const router = createRouter({
           component: () => import('@/views/ProductCreateView.vue'),
           meta: { title: '发布商品' },
         },
+        {
+          path: 'products/:spuId/edit',
+          name: 'product-edit',
+          component: () => import('@/views/ProductCreateView.vue'),
+          meta: { title: '编辑商品' },
+        },
       ],
     },
   ],
