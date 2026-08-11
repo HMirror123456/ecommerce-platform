@@ -1,14 +1,30 @@
 import pool, { toIso, toMysqlDateTime } from '../db/pool.js';
 
-function mapRow(row) {
-  let items = row.items;
-  if (typeof items === 'string') {
+function parseJsonField(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
     try {
-      items = JSON.parse(items);
+      return JSON.parse(value);
     } catch {
-      items = [];
+      return fallback;
     }
   }
+  return fallback;
+}
+
+function mapReturnShipment(raw) {
+  const shipment = parseJsonField(raw, null);
+  if (!shipment || typeof shipment !== 'object') return null;
+  return {
+    logisticsCompany: shipment.logisticsCompany || '',
+    trackingNo: shipment.trackingNo || '',
+    shippedAt: shipment.shippedAt ? toIso(shipment.shippedAt) || shipment.shippedAt : null,
+  };
+}
+
+function mapRow(row) {
+  const items = parseJsonField(row.items, []);
   return {
     afterSaleId: row.after_sale_id,
     orderId: row.order_id,
@@ -25,6 +41,7 @@ function mapRow(row) {
     auditReason: row.audit_reason || null,
     auditedAt: toIso(row.audited_at),
     escalatedAt: toIso(row.escalated_at),
+    returnShipment: mapReturnShipment(row.return_shipment),
     items: Array.isArray(items) ? items : [],
   };
 }
@@ -100,13 +117,41 @@ export async function listByMerchant(merchantId, status) {
 }
 
 export async function listEscalated(page = 1, pageSize = 20) {
-  const [countRows] = await pool.query(`SELECT COUNT(*) AS cnt FROM after_sales WHERE status = 'ESCALATED'`);
+  return listAdmin({ status: 'ESCALATED', page, pageSize });
+}
+
+/**
+ * @param {{ status?: string|string[], page?: number, pageSize?: number }} opts
+ * status: ESCALATED | REFUNDED | REJECTED | COMPLETED(REFUNDED+REJECTED) | ALL
+ */
+export async function listAdmin({ status = 'ESCALATED', page = 1, pageSize = 20 } = {}) {
+  let statuses;
+  if (status === 'COMPLETED') {
+    statuses = ['REFUNDED', 'REJECTED'];
+  } else if (status === 'ALL' || status == null || status === '') {
+    statuses = null;
+  } else if (Array.isArray(status)) {
+    statuses = status;
+  } else {
+    statuses = [status];
+  }
+
+  let countSql = 'SELECT COUNT(*) AS cnt FROM after_sales';
+  let listSql = 'SELECT * FROM after_sales';
+  const params = [];
+  if (statuses?.length) {
+    const placeholders = statuses.map(() => '?').join(',');
+    const where = ` WHERE status IN (${placeholders})`;
+    countSql += where;
+    listSql += where;
+    params.push(...statuses);
+  }
+  listSql += ' ORDER BY COALESCE(audited_at, escalated_at, applied_at) DESC LIMIT ? OFFSET ?';
+
+  const [countRows] = await pool.query(countSql, params);
   const total = Number(countRows[0]?.cnt) || 0;
   const offset = (page - 1) * pageSize;
-  const [rows] = await pool.query(
-    `SELECT * FROM after_sales WHERE status = 'ESCALATED' ORDER BY applied_at DESC LIMIT ? OFFSET ?`,
-    [pageSize, offset],
-  );
+  const [rows] = await pool.query(listSql, [...params, pageSize, offset]);
   return { total, list: rows.map(mapRow) };
 }
 
@@ -131,6 +176,26 @@ export async function updateAudit(afterSaleId, { status, auditReason, auditedAt 
   return findById(afterSaleId);
 }
 
+/** 领域规则：APPROVED → RETURNING，写入寄回物流 */
+export async function updateReturnShipment(afterSaleId, { status, returnShipment }) {
+  await pool.query(
+    `UPDATE after_sales SET status = ?, return_shipment = ? WHERE after_sale_id = ?`,
+    [status, JSON.stringify(returnShipment), afterSaleId],
+  );
+  return findById(afterSaleId);
+}
+
+/** 领域规则：商家 48h 未处理 APPLIED → ESCALATED */
+export async function escalateOverdue(now = new Date()) {
+  const [result] = await pool.query(
+    `UPDATE after_sales
+     SET status = 'ESCALATED', escalated_at = ?
+     WHERE status = 'APPLIED' AND merchant_deadline < ?`,
+    [toMysqlDateTime(now), toMysqlDateTime(now)],
+  );
+  return Number(result.affectedRows) || 0;
+}
+
 export function serialize(item) {
   return {
     afterSaleId: item.afterSaleId,
@@ -144,6 +209,9 @@ export function serialize(item) {
     appliedAt: item.appliedAt,
     merchantDeadline: item.merchantDeadline,
     auditReason: item.auditReason || null,
+    auditedAt: item.auditedAt || null,
+    escalatedAt: item.escalatedAt || null,
+    returnShipment: item.returnShipment || null,
     orderNo: item.orderNo,
     shopName: item.shopName,
     items: item.items || [],

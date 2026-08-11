@@ -36,6 +36,16 @@ export function fetchEscalatedAfterSales(params) {
   return client.get('/admin/after-sales', { params }).then((r) => r.data);
 }
 
+export function fetchAdminAfterSales(params) {
+  return client.get('/admin/after-sales', { params }).then((r) => r.data);
+}
+
+export function arbitrateAfterSale(afterSaleId, approved, reason) {
+  return client
+    .post(`/admin/after-sales/${afterSaleId}/arbitrate`, { approved, reason })
+    .then((r) => r.data);
+}
+
 export function fetchPendingMerchants() {
   return client.get('/admin/merchants/pending').then((r) => r.data);
 }
@@ -46,4 +56,20 @@ export function fetchMerchantApplications(params) {
 
 export function auditMerchant(applicationId, approved, reason) {
   return client.post(`/admin/merchants/${applicationId}/audit`, { approved, reason }).then((r) => r.data);
+}
+
+export function fetchAdmins(params) {
+  return client.get('/admin/admins', { params }).then((r) => r.data);
+}
+
+export function createAdmin(payload) {
+  return client.post('/admin/admins', payload).then((r) => r.data);
+}
+
+export function updateAdmin(adminId, payload) {
+  return client.patch(`/admin/admins/${adminId}`, payload).then((r) => r.data);
+}
+
+export function deleteAdmin(adminId) {
+  return client.delete(`/admin/admins/${adminId}`).then((r) => r.data);
 }

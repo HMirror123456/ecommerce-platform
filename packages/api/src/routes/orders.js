@@ -7,6 +7,7 @@ import {
   getOrderById,
   getOrdersByUser,
   payOrder,
+  submitAfterSaleReturn,
 } from '../data/store.js';
 import { requireUser } from '../middleware/auth.js';
 
@@ -103,6 +104,23 @@ router.post('/:id/after-sales/:afterSaleId/escalate', requireUser, async (req, r
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
     if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
     res.json({ message: '已申请平台介入', afterSale: result.afterSale });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/after-sales/:afterSaleId/return', requireUser, async (req, res, next) => {
+  try {
+    const result = await submitAfterSaleReturn(
+      req.user.id,
+      Number(req.params.id),
+      Number(req.params.afterSaleId),
+      req.body || {},
+    );
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
+    res.json(result.afterSale);
   } catch (err) {
     next(err);
   }

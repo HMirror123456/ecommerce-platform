@@ -7,6 +7,7 @@ import {
   cancelOrder,
   escalateAfterSale,
   fetchOrder,
+  submitAfterSaleReturn,
 } from '@/api/order';
 
 const ORDER_STATUS_LABELS = {
@@ -45,6 +46,14 @@ const form = ref({
   type: 'REFUND_ONLY',
   reason: '',
   subOrderId: null,
+});
+
+const returnDialogVisible = ref(false);
+const returnSubmitting = ref(false);
+const returnTarget = ref(null);
+const returnForm = ref({
+  logisticsCompany: '',
+  trackingNo: '',
 });
 
 const canApplyAfterSale = computed(() => {
@@ -140,6 +149,38 @@ function canEscalate(afterSale) {
   return afterSale.status === 'APPLIED' || afterSale.status === 'REJECTED';
 }
 
+function canSubmitReturn(afterSale) {
+  return afterSale.type === 'RETURN_REFUND' && afterSale.status === 'APPROVED';
+}
+
+function openReturnDialog(afterSale) {
+  returnTarget.value = afterSale;
+  returnForm.value = { logisticsCompany: '', trackingNo: '' };
+  returnDialogVisible.value = true;
+}
+
+async function onSubmitReturn() {
+  if (!returnForm.value.logisticsCompany?.trim() || !returnForm.value.trackingNo?.trim()) {
+    ElMessage.warning('请填写物流公司与运单号');
+    return;
+  }
+  if (!returnTarget.value) return;
+  returnSubmitting.value = true;
+  try {
+    await submitAfterSaleReturn(orderId.value, returnTarget.value.afterSaleId, {
+      logisticsCompany: returnForm.value.logisticsCompany.trim(),
+      trackingNo: returnForm.value.trackingNo.trim(),
+    });
+    ElMessage.success('寄回物流已提交，等待商家验收');
+    returnDialogVisible.value = false;
+    await loadOrder();
+  } catch (e) {
+    ElMessage.error(e.message || '提交失败');
+  } finally {
+    returnSubmitting.value = false;
+  }
+}
+
 onMounted(loadOrder);
 </script>
 
@@ -219,17 +260,34 @@ onMounted(loadOrder);
             </p>
             <p class="line muted">原因：{{ as.reason }}</p>
             <p v-if="as.auditReason" class="line muted">处理说明：{{ as.auditReason }}</p>
+            <p
+              v-if="as.returnShipment"
+              class="line muted"
+            >
+              寄回物流：{{ as.returnShipment.logisticsCompany }} {{ as.returnShipment.trackingNo }}
+              · {{ formatTime(as.returnShipment.shippedAt) }}
+            </p>
             <p class="line muted">申请时间：{{ formatTime(as.appliedAt) }}</p>
           </div>
-          <el-button
-            v-if="canEscalate(as)"
-            type="warning"
-            plain
-            size="small"
-            @click="onEscalate(as)"
-          >
-            申请平台介入
-          </el-button>
+          <div class="as-actions">
+            <el-button
+              v-if="canEscalate(as)"
+              type="warning"
+              plain
+              size="small"
+              @click="onEscalate(as)"
+            >
+              申请平台介入
+            </el-button>
+            <el-button
+              v-if="canSubmitReturn(as)"
+              type="primary"
+              size="small"
+              @click="openReturnDialog(as)"
+            >
+              填写寄回物流
+            </el-button>
+          </div>
         </div>
       </el-card>
 
@@ -276,6 +334,21 @@ onMounted(loadOrder);
         <el-button type="primary" :loading="submitting" @click="onSubmitAfterSale">提交</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="returnDialogVisible" title="填写寄回物流" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="物流公司" required>
+          <el-input v-model="returnForm.logisticsCompany" placeholder="如：顺丰速运" maxlength="64" />
+        </el-form-item>
+        <el-form-item label="运单号" required>
+          <el-input v-model="returnForm.trackingNo" placeholder="请输入运单号" maxlength="64" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="returnDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="returnSubmitting" @click="onSubmitReturn">提交寄回</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -320,6 +393,7 @@ onMounted(loadOrder);
 }
 .after-sale-row:last-child { border-bottom: none; }
 .as-type { margin-left: 8px; font-weight: 600; }
+.as-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
 .actions {
   display: flex;
   justify-content: flex-end;

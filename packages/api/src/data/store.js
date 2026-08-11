@@ -5,7 +5,7 @@ import * as merchantRepo from '../repositories/merchantRepo.js';
 import * as merchantApplicationRepo from '../repositories/merchantApplicationRepo.js';
 import * as productAuditRepo from '../repositories/productAuditRepo.js';
 import * as userRepo from '../repositories/userRepo.js';
-import * as orderRepo from '../repositories/orderRepo.js';s
+import * as orderRepo from '../repositories/orderRepo.js';
 import * as afterSaleRepo from '../repositories/afterSaleRepo.js';
 import * as favoriteRepo from '../repositories/favoriteRepo.js';
 import * as categoryRepo from '../repositories/categoryRepo.js';
@@ -292,6 +292,123 @@ export async function expirePendingOrders() {
     });
     await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
   }
+  await escalateOverdueAfterSales();
+}
+
+/** 领域规则：商家 48h 未处理 APPLIED → ESCALATED */
+export async function escalateOverdueAfterSales() {
+  return afterSaleRepo.escalateOverdue(new Date());
+}
+
+/**
+ * 领域规则：同意售后收尾 → REFUNDED；
+ * AfterSaleRefunded：订单 REFUNDED，库存 available += quantity
+ */
+async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
+  for (const line of item.items || []) {
+    const skuId = Number(line.skuId);
+    const quantity = Number(line.quantity);
+    if (!Number.isInteger(skuId) || skuId <= 0) continue;
+    if (!Number.isInteger(quantity) || quantity <= 0) continue;
+    const restored = await stockRepo.restoreAvailable(skuId, quantity);
+    if (restored.error === 'SKU_NOT_FOUND') {
+      // Demo seed 售后可能指向未入库 SKU；跳过以保证仲裁可完成
+      continue;
+    }
+    if (restored.error) return restored;
+  }
+
+  const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
+    status: 'REFUNDED',
+    auditReason,
+    auditedAt: new Date(),
+  });
+  await orderRepo.updateOrder(item.orderId, { status: 'REFUNDED' });
+  if (item.subOrderId) {
+    await orderRepo.updateSubOrderStatus(item.subOrderId, 'REFUNDED');
+  }
+  return { afterSale: afterSaleRepo.serialize(updated) };
+}
+
+/**
+ * 领域规则：
+ * - REFUND_ONLY：同意 → 直接 REFUNDED
+ * - RETURN_REFUND：同意 → APPROVED，等待用户寄回
+ */
+async function approveAfterSale(item, { auditReason = null } = {}) {
+  if (item.type === 'RETURN_REFUND') {
+    const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
+      status: 'APPROVED',
+      auditReason: auditReason || '同意退货退款，请用户寄回商品',
+      auditedAt: new Date(),
+    });
+    return { afterSale: afterSaleRepo.serialize(updated) };
+  }
+  return finalizeApprovedAfterSale(item, { auditReason });
+}
+
+/** 领域规则：售后拒绝关闭 → 订单退出 REFUNDING，恢复 SHIPPED */
+async function closeRejectedAfterSale(item, reason) {
+  const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
+    status: 'REJECTED',
+    auditReason: reason?.trim() || null,
+    auditedAt: new Date(),
+  });
+  const order = await orderRepo.findById(item.orderId);
+  if (order?.status === 'REFUNDING') {
+    await orderRepo.updateOrder(item.orderId, { status: 'SHIPPED' });
+  }
+  if (item.subOrderId) {
+    const sub = order?.subOrders?.find((s) => s.subOrderId === item.subOrderId);
+    if (sub?.status === 'REFUNDING') {
+      await orderRepo.updateSubOrderStatus(item.subOrderId, 'SHIPPED');
+    }
+  }
+  return { afterSale: afterSaleRepo.serialize(updated) };
+}
+
+/** 领域规则：APPROVED + RETURN_REFUND → RETURNING（用户寄回） */
+export async function submitAfterSaleReturn(userId, orderId, afterSaleId, { logisticsCompany, trackingNo } = {}) {
+  await expirePendingOrders();
+  if (!logisticsCompany?.trim() || !trackingNo?.trim()) {
+    return { error: 'INVALID_INPUT', message: '请填写物流公司与运单号' };
+  }
+
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item || item.orderId !== Number(orderId) || item.userId !== userId) {
+    return { error: 'NOT_FOUND', message: '售后单不存在' };
+  }
+  if (item.type !== 'RETURN_REFUND') {
+    return { error: 'INVALID_STATE', message: '仅退货退款售后需要寄回物流' };
+  }
+  if (item.status !== 'APPROVED') {
+    return { error: 'INVALID_STATE', message: '当前售后状态不允许填写寄回物流' };
+  }
+
+  const returnShipment = {
+    logisticsCompany: logisticsCompany.trim(),
+    trackingNo: trackingNo.trim(),
+    shippedAt: new Date().toISOString(),
+  };
+  const updated = await afterSaleRepo.updateReturnShipment(afterSaleId, {
+    status: 'RETURNING',
+    returnShipment,
+  });
+  return { afterSale: afterSaleRepo.serialize(updated) };
+}
+
+/** 领域规则：RETURNING → REFUNDED（商家验收） */
+export async function confirmAfterSaleReturn(merchantId, afterSaleId) {
+  await expirePendingOrders();
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+  if (item.merchantId !== merchantId) return { error: 'FORBIDDEN', message: '无权处理该售后单' };
+  if (item.status !== 'RETURNING') {
+    return { error: 'INVALID_STATE', message: '仅退货中（RETURNING）售后可验收退款' };
+  }
+  return finalizeApprovedAfterSale(item, {
+    auditReason: item.auditReason || '商家验收通过，已退款',
+  });
 }
 
 export async function findAdmin(username, password) {
@@ -666,10 +783,6 @@ export async function removeFavorite(userId, spuId) {
   return { ok: true };
 }
 
-export function getPublicProductDetail(spuId) {
-  const spu = getSpuById(spuId);
-  if (!spu || spu.status !== 'ON_SHELF') return null;
-  return serializePublicProductDetail(spu);
 export async function getPublicProductDetail(spuId) {
   await expirePendingOrders();
   return productRepo.findPublicProductDetail(spuId);
@@ -1138,12 +1251,36 @@ export async function auditMerchantAfterSale(merchantId, afterSaleId, { approved
     return { error: 'INVALID_STATE', message: '该售后单当前状态不允许处理' };
   }
 
-  const updated = await afterSaleRepo.updateAudit(afterSaleId, {
-    status: approved ? 'APPROVED' : 'REJECTED',
-    auditReason: reason?.trim() || null,
-    auditedAt: new Date(),
-  });
-  return { afterSale: afterSaleRepo.serialize(updated) };
+  if (approved) {
+    return approveAfterSale(item, {
+      auditReason: reason?.trim() || '商家同意售后',
+    });
+  }
+  return closeRejectedAfterSale(item, reason);
+}
+
+/** 领域规则：ESCALATED → 同意/拒绝；REFUND_ONLY 直接退款，RETURN_REFUND 停在 APPROVED */
+export async function arbitrateAfterSale(afterSaleId, { approved, reason } = {}) {
+  await expirePendingOrders();
+  if (typeof approved !== 'boolean') {
+    return { error: 'INVALID_INPUT', message: 'approved 必须是布尔值' };
+  }
+  if (!approved && !reason?.trim()) {
+    return { error: 'REASON_REQUIRED', message: '拒绝售后必须填写原因' };
+  }
+
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+  if (item.status !== 'ESCALATED') {
+    return { error: 'INVALID_STATE', message: '仅待仲裁（ESCALATED）售后可由平台裁定' };
+  }
+
+  if (approved) {
+    return approveAfterSale(item, {
+      auditReason: reason?.trim() || '平台仲裁同意',
+    });
+  }
+  return closeRejectedAfterSale(item, reason);
 }
 
 export async function getDashboardSummary() {
@@ -1171,8 +1308,13 @@ export async function getDashboardSummary() {
 }
 
 export async function getEscalatedAfterSales(page = 1, pageSize = 20) {
+  return getAdminAfterSales({ status: 'ESCALATED', page, pageSize });
+}
+
+/** status: ESCALATED | REFUNDED | REJECTED | COMPLETED | ALL */
+export async function getAdminAfterSales({ status = 'ESCALATED', page = 1, pageSize = 20 } = {}) {
   await expirePendingOrders();
-  const { total, list } = await afterSaleRepo.listEscalated(page, pageSize);
+  const { total, list } = await afterSaleRepo.listAdmin({ status, page, pageSize });
   return {
     total,
     list: list.map(afterSaleRepo.serialize),

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   auditMerchantAfterSale,
+  confirmAfterSaleReturn,
   createMerchantProduct,
   getMerchantAfterSales,
   getMerchantApplicationByPhone,
@@ -171,6 +172,20 @@ router.post('/after-sales/:afterSaleId/audit', requireMerchant, async (req, res,
       return res.status(400).json({ message: result.message });
     }
     res.json({ message: '售后处理成功', afterSale: result.afterSale });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/after-sales/:afterSaleId/confirm-return', requireMerchant, async (req, res, next) => {
+  try {
+    const afterSaleId = Number(req.params.afterSaleId);
+    const result = await confirmAfterSaleReturn(req.merchant.id, afterSaleId);
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.json({ message: '验收通过，已退款', afterSale: result.afterSale });
   } catch (err) {
     next(err);
   }

@@ -9,7 +9,12 @@ const auth = useAuthStore();
 
 const activeMenu = computed(() => route.path);
 const pageTitle = computed(() => route.meta.title || '平台管理后台');
-const roleLabel = computed(() => (auth.role === 'OPERATOR' ? '运营管理员' : '客服管理员'));
+const roleLabel = computed(() => {
+  if (auth.role === 'SUPER_ADMIN') return '超级管理员';
+  if (auth.role === 'OPERATOR') return '运营管理员';
+  if (auth.role === 'CS_AGENT') return '客服管理员';
+  return auth.role || '管理员';
+});
 
 function logout() {
   auth.logout();
@@ -25,6 +30,10 @@ function logout() {
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
           <span>工作台</span>
+        </el-menu-item>
+        <el-menu-item v-if="auth.canManageAdmins" index="/admins">
+          <el-icon><UserFilled /></el-icon>
+          <span>管理员账号</span>
         </el-menu-item>
         <el-menu-item v-if="auth.isOperator" index="/audit/products">
           <el-icon><Goods /></el-icon>

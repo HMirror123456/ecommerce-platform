@@ -712,6 +712,40 @@ paths:
         '200':
           description: OK
 
+  /orders/{orderId}/after-sales/{afterSaleId}/return:
+    post:
+      tags: [order]
+      summary: 用户填写退货寄回物流（APPROVED → RETURNING）
+      description: 仅 RETURN_REFUND 且 status=APPROVED 时可调用
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnShipmentRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AfterSale'
+        '409':
+          description: 当前状态不允许寄回
+
   # ========== Merchant ==========
   /merchant/applications:
     post:
@@ -1031,11 +1065,150 @@ paths:
         '200':
           description: OK
 
+  /merchant/after-sales/{afterSaleId}/confirm-return:
+    post:
+      tags: [merchant]
+      summary: 商家验收退货并退款（RETURNING → REFUNDED）
+      description: 用户已寄回后，商家确认收货并完成退款与库存回滚
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AfterSale'
+        '409':
+          description: 当前状态不允许验收
+
   # ========== Admin ==========
+  /admin/admins:
+    get:
+      tags: [admin]
+      summary: 管理员账号列表（仅 SUPER_ADMIN）
+      description: 可按 role、status、keyword（用户名）筛选。SUPER_ADMIN 专用。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            $ref: '#/components/schemas/AdminRole'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AdminStatus'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+          description: 用户名模糊搜索
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  list:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminAccount'
+        '403':
+          description: 非 SUPER_ADMIN
+    post:
+      tags: [admin]
+      summary: 创建运营/客服管理员（仅 SUPER_ADMIN）
+      description: 仅允许创建 OPERATOR 或 CS_AGENT，不可创建 SUPER_ADMIN。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdminRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAccount'
+        '400':
+          description: 参数错误或试图创建 SUPER_ADMIN
+        '409':
+          description: 用户名已存在
+
+  /admin/admins/{adminId}:
+    patch:
+      tags: [admin]
+      summary: 更新管理员（角色/状态/密码）
+      description: |
+        仅 SUPER_ADMIN。用户名不可改。
+        角色仅允许改为 OPERATOR / CS_AGENT，不可把账号升为 SUPER_ADMIN。
+        不可禁用自己；不可禁用最后一个 ACTIVE SUPER_ADMIN。
+        password 省略则不修改密码。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: adminId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAdminRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAccount'
+        '400':
+          description: 非法操作（如禁用自己、非法角色）
+        '404':
+          description: 管理员不存在
+    delete:
+      tags: [admin]
+      summary: 删除运营/客服管理员
+      description: |
+        仅 SUPER_ADMIN。仅可删除 OPERATOR / CS_AGENT；
+        不可删除自己；不可删除 SUPER_ADMIN。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: adminId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: 非法操作（如删除自己或超管）
+        '404':
+          description: 管理员不存在
+
   /admin/dashboard/summary:
     get:
       tags: [admin]
       summary: 工作台待办统计
+      description: 角色 OPERATOR、CS_AGENT 或 SUPER_ADMIN
       security:
         - bearerAuth: []
       responses:
@@ -1188,10 +1361,19 @@ paths:
   /admin/after-sales:
     get:
       tags: [admin]
-      summary: 待仲裁售后列表
+      summary: 售后列表（待仲裁 / 已完成 / 按状态筛选）
       security:
         - bearerAuth: []
       parameters:
+        - name: status
+          in: query
+          description: |
+            售后状态筛选。`ESCALATED` 待仲裁；`REFUNDED`/`REJECTED` 终态；
+            `COMPLETED` 表示已完成（REFUNDED+REJECTED）；不传则默认 `ESCALATED`。
+          schema:
+            type: string
+            enum: [ESCALATED, REFUNDED, REJECTED, COMPLETED]
+            default: ESCALATED
         - name: page
           in: query
           schema:
@@ -1475,8 +1657,63 @@ components:
     AdminRole:
       type: string
       enum:
+        - SUPER_ADMIN
         - OPERATOR
         - CS_AGENT
+
+    AdminStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - DISABLED
+
+    AdminAccount:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        role:
+          $ref: '#/components/schemas/AdminRole'
+        status:
+          $ref: '#/components/schemas/AdminStatus'
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateAdminRequest:
+      type: object
+      required: [username, password, role]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+        role:
+          type: string
+          enum:
+            - OPERATOR
+            - CS_AGENT
+          description: 不可创建 SUPER_ADMIN
+
+    UpdateAdminRequest:
+      type: object
+      description: 至少提供 role、status、password 之一；用户名不可改
+      properties:
+        role:
+          type: string
+          enum:
+            - OPERATOR
+            - CS_AGENT
+          description: 仅允许运营/客服互切，不可改为 SUPER_ADMIN
+        status:
+          $ref: '#/components/schemas/AdminStatus'
+        password:
+          type: string
+          format: password
+          description: 传入则重置密码；省略则不改
 
     AuditRequest:
       type: object
@@ -1622,6 +1859,26 @@ components:
         reason:
           type: string
 
+    ReturnShipmentRequest:
+      type: object
+      required: [logisticsCompany, trackingNo]
+      properties:
+        logisticsCompany:
+          type: string
+        trackingNo:
+          type: string
+
+    ReturnShipment:
+      type: object
+      properties:
+        logisticsCompany:
+          type: string
+        trackingNo:
+          type: string
+        shippedAt:
+          type: string
+          format: date-time
+
     AfterSale:
       type: object
       properties:
@@ -1654,6 +1911,12 @@ components:
           format: date-time
         auditReason:
           type: string
+        auditedAt:
+          type: string
+          format: date-time
+        returnShipment:
+          $ref: '#/components/schemas/ReturnShipment'
+          description: 用户寄回物流；RETURNING/REFUNDED 时可能有值
         items:
           type: array
           items:

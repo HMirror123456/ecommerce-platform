@@ -50,6 +50,8 @@ export function mapAdminRow(row) {
     username: row.username,
     password: row.password,
     role: row.role,
+    status: row.status || 'ACTIVE',
+    createdAt: toIso(row.created_at),
   };
 }
 

@@ -98,7 +98,12 @@ erDiagram
 - **不变式**：仅 `SHIPPED`/`COMPLETED` 订单可申请（P1 简化为已发货）
 
 #### Admin（平台管理员）
-- **属性**：`id`, `username`, `passwordHash`, `role`（`OPERATOR`/`CS_AGENT`）, `createdAt`
+- **属性**：`id`, `username`, `passwordHash`, `role`（`SUPER_ADMIN`/`OPERATOR`/`CS_AGENT`）, `status`（`ACTIVE`/`DISABLED`）, `createdAt`
+- **不变式**：
+  - `DISABLED` 不可登录；业务接口鉴权时亦拒绝
+  - 至少保留 1 个 `ACTIVE` 的 `SUPER_ADMIN`
+  - 不可禁用自己；不可通过 API 创建或提升为 `SUPER_ADMIN`（仅 seed 预置）
+  - `SUPER_ADMIN` 继承 `OPERATOR` 与 `CS_AGENT` 全部业务权限，并可管理运营/客服账号
 
 #### ProductAudit（商品审核记录）
 - **属性**：`id`, `spuId`, `adminId`, `approved`, `reason`, `auditedAt`
@@ -205,8 +210,12 @@ stateDiagram-v2
 | 已同意 | APPROVED | 进入退款或退货流程 |
 | 已拒绝 | REJECTED | 商家或平台拒绝 |
 | 已升级 | ESCALATED | 待平台客服仲裁 |
-| 退货中 | RETURNING | 用户已寄回 |
+| 退货中 | RETURNING | 用户已寄回，待商家验收 |
 | 已退款 | REFUNDED | 退款完成，订单 → REFUNDED，库存回滚 |
+
+**Demo 约定：**
+- `REFUND_ONLY`：商家/平台同意后直接 `REFUNDED`
+- `RETURN_REFUND`：同意后停在 `APPROVED`，用户填写寄回物流 → `RETURNING`，商家验收 → `REFUNDED`
 
 ---
 

@@ -24,7 +24,13 @@ export function requireAdmin(requiredRoles) {
       if (payload.type !== 'admin') return res.status(403).json({ message: '无权限' });
       const admin = await findAdminById(payload.sub);
       if (!admin) return res.status(401).json({ message: '账号无效' });
-      if (requiredRoles?.length && !requiredRoles.includes(admin.role)) {
+      if (admin.status === 'DISABLED') return res.status(401).json({ message: '账号已禁用' });
+      // SUPER_ADMIN inherits OPERATOR / CS_AGENT business permissions (ADMIN.md §2)
+      if (
+        requiredRoles?.length &&
+        admin.role !== 'SUPER_ADMIN' &&
+        !requiredRoles.includes(admin.role)
+      ) {
         return res.status(403).json({ message: '当前角色无此操作权限' });
       }
       req.admin = admin;

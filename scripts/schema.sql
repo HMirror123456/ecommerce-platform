@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS admins (
   id INT PRIMARY KEY AUTO_INCREMENT,
   username VARCHAR(64) NOT NULL UNIQUE,
   password VARCHAR(128) NOT NULL COMMENT 'Demo plaintext; use bcrypt in production',
-  role ENUM('OPERATOR', 'CS_AGENT') NOT NULL
+  role ENUM('SUPER_ADMIN', 'OPERATOR', 'CS_AGENT') NOT NULL,
+  status ENUM('ACTIVE', 'DISABLED') NOT NULL DEFAULT 'ACTIVE',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS merchants (
@@ -234,6 +236,7 @@ CREATE TABLE IF NOT EXISTS after_sales (
   audit_reason TEXT NULL,
   audited_at DATETIME(3) NULL,
   escalated_at DATETIME(3) NULL,
+  return_shipment JSON NULL,
   items JSON NOT NULL,
   INDEX idx_after_sales_status (status),
   INDEX idx_after_sales_merchant (merchant_id)

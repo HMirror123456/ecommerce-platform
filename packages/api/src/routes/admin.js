@@ -2,20 +2,77 @@ import { Router } from 'express';
 import {
   auditMerchantApplication,
   auditProduct,
+  arbitrateAfterSale,
   getAdminOrderById,
   getAdminOrders,
   getAdminProductDetail,
   getDashboardSummary,
-  getEscalatedAfterSales,
+  getAdminAfterSales,
   getMerchantApplications,
   getPendingMerchants,
   getPendingProducts,
   getProductAuditHistory,
 } from '../data/store.js';
+import {
+  createAdmin,
+  deleteAdmin,
+  listAdmins,
+  updateAdmin,
+} from '../repositories/adminRepo.js';
 import { requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 const adminRoles = ['OPERATOR', 'CS_AGENT'];
+
+router.get('/admins', requireAdmin(['SUPER_ADMIN']), async (req, res, next) => {
+  try {
+    const { role, status, keyword } = req.query;
+    res.json({ list: await listAdmins({ role, status, keyword }) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/admins', requireAdmin(['SUPER_ADMIN']), async (req, res, next) => {
+  try {
+    const { username, password, role } = req.body || {};
+    const result = await createAdmin({ username, password, role });
+    if (result.error === 'INVALID' || result.error === 'INVALID_ROLE') {
+      return res.status(400).json({ message: result.message });
+    }
+    if (result.error === 'USERNAME_EXISTS') return res.status(409).json({ message: result.message });
+    res.status(201).json(result.admin);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/admins/:adminId', requireAdmin(['SUPER_ADMIN']), async (req, res, next) => {
+  try {
+    const adminId = Number(req.params.adminId);
+    const { role, status, password } = req.body || {};
+    const result = await updateAdmin(adminId, { role, status, password }, req.admin.id);
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID' || result.error === 'INVALID_ROLE') {
+      return res.status(400).json({ message: result.message });
+    }
+    res.json(result.admin);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/admins/:adminId', requireAdmin(['SUPER_ADMIN']), async (req, res, next) => {
+  try {
+    const adminId = Number(req.params.adminId);
+    const result = await deleteAdmin(adminId, req.admin.id);
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID') return res.status(400).json({ message: result.message });
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/dashboard/summary', requireAdmin(adminRoles), async (_req, res, next) => {
   try {
@@ -51,9 +108,9 @@ router.get('/products/audits', requireAdmin(['OPERATOR']), async (req, res, next
 
 router.get('/products/:spuId', requireAdmin(['OPERATOR']), async (req, res, next) => {
   try {
-  const product = await getAdminProductDetail(Number(req.params.spuId));
-  if (!product) return res.status(404).json({ message: '商品不存在' });
-  res.json(product);
+    const product = await getAdminProductDetail(Number(req.params.spuId));
+    if (!product) return res.status(404).json({ message: '商品不存在' });
+    res.json(product);
   } catch (err) {
     next(err);
   }
@@ -99,7 +156,26 @@ router.get('/after-sales', requireAdmin(['CS_AGENT']), async (req, res, next) =>
   try {
     const page = Number(req.query.page) || 1;
     const pageSize = Number(req.query.pageSize) || 20;
-    res.json(await getEscalatedAfterSales(page, pageSize));
+    const status = req.query.status || 'ESCALATED';
+    res.json(await getAdminAfterSales({ status, page, pageSize }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/after-sales/:afterSaleId/arbitrate', requireAdmin(['CS_AGENT']), async (req, res, next) => {
+  try {
+    const afterSaleId = Number(req.params.afterSaleId);
+    const { approved, reason } = req.body || {};
+    if (typeof approved !== 'boolean') return res.status(400).json({ message: 'approved 必填' });
+    const result = await arbitrateAfterSale(afterSaleId, { approved, reason });
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    if (result.error === 'REASON_REQUIRED' || result.error === 'INVALID_INPUT') {
+      return res.status(400).json({ message: result.message });
+    }
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.json(result.afterSale);
   } catch (err) {
     next(err);
   }

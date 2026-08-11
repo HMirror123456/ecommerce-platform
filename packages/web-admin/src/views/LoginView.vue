@@ -9,7 +9,7 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
-const form = ref({ username: 'operator', password: 'operator123' });
+const form = ref({ username: 'superadmin', password: 'super123' });
 const loading = ref(false);
 
 onMounted(() => {
@@ -20,11 +20,15 @@ onMounted(() => {
 
 function getDefaultPath(role, redirect) {
   if (redirect && typeof redirect === 'string') {
-    if (role === 'CS_AGENT' && (redirect.startsWith('/audit/') || redirect === '/audit/products')) {
+    if (role === 'CS_AGENT' && (redirect.startsWith('/audit/') || redirect === '/admins')) {
+      return '/dashboard';
+    }
+    if (role === 'OPERATOR' && (redirect.startsWith('/after-sales') || redirect === '/admins')) {
       return '/dashboard';
     }
     return redirect;
   }
+  if (role === 'SUPER_ADMIN') return '/admins';
   return '/dashboard';
 }
 
@@ -61,7 +65,7 @@ async function onSubmit() {
         </el-form-item>
         <el-button type="primary" class="submit" :loading="loading" @click="onSubmit">登录</el-button>
       </el-form>
-      <p class="hint">运营：operator / operator123 · 客服：csagent / cs123</p>
+      <p class="hint">超管：superadmin / super123 · 运营：operator / operator123 · 客服：csagent / cs123</p>
     </div>
   </div>
 </template>
