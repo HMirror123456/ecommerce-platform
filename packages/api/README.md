@@ -35,9 +35,10 @@ API 地址：`http://localhost:8080/api`
 ## 已持久化（MySQL）
 
 - 管理员、商家、入驻申请、商品审核记录（Batch 1）
+- 类目、SPU、SKU、库存（Batch 2）
 - 用户、地址、购物车、订单、支付、售后（Batch 3）
 
-**仍在内存（重启丢失）：** SPU/SKU/库存、类目。见 [`docs/DB_MIGRATION.md`](../../docs/DB_MIGRATION.md)。
+商家入驻申请、商家账号、商品查询、商家商品管理、商品审核流程、基础库存能力和商家售后处理已切换 MySQL。见 [`docs/DB_MIGRATION.md`](../../docs/DB_MIGRATION.md)。
 
 ## 演示账号
 
@@ -47,11 +48,4 @@ API 地址：`http://localhost:8080/api`
 | 运营 | operator | operator123 |
 | 客服 | csagent | cs123 |
 | 商家 | merchant1 | 123456 |
-
-## 联调验证
-
-```bash
-node ../../scripts/verify-merchant-onboarding.mjs
-node ../../scripts/verify-product-audit-history.mjs
-node ../../scripts/verify-db-persistence.mjs
-```
+| 辅助商家 | merchant2 | 123456 |

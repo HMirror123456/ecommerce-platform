@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import {
   auditMerchantAfterSale,
+  batchOffShelfMerchantProducts,
+  batchSubmitMerchantProductAudit,
   confirmAfterSaleReturn,
   createMerchantProduct,
   getMerchantAfterSales,
@@ -14,6 +16,7 @@ import {
   submitMerchantApplication,
   submitMerchantProductAudit,
   updateMerchantProduct,
+  updateMerchantSkuStock,
 } from '../data/store.js';
 import { requireMerchant } from '../middleware/auth.js';
 
@@ -53,7 +56,9 @@ router.get('/dashboard/summary', requireMerchant, async (req, res, next) => {
 
 router.get('/products', requireMerchant, async (req, res, next) => {
   try {
-    res.json(await getMerchantProducts(req.merchant));
+    const result = await getMerchantProducts(req.merchant, req.query || {});
+    if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -64,6 +69,26 @@ router.post('/products', requireMerchant, async (req, res, next) => {
     const result = await createMerchantProduct(req.merchant, req.body || {});
     if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
     return res.status(201).json(result.product);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/products/batch-submit-audit', requireMerchant, async (req, res, next) => {
+  try {
+    const result = await batchSubmitMerchantProductAudit(req.merchant, req.body || {});
+    if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/products/batch-off-shelf', requireMerchant, async (req, res, next) => {
+  try {
+    const result = await batchOffShelfMerchantProducts(req.merchant, req.body || {});
+    if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
+    return res.json(result);
   } catch (err) {
     next(err);
   }
@@ -115,6 +140,19 @@ router.post('/products/:spuId/off-shelf', requireMerchant, async (req, res, next
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
     if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
     if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/skus/:skuId/stock', requireMerchant, async (req, res, next) => {
+  try {
+    const skuId = Number(req.params.skuId);
+    const result = await updateMerchantSkuStock(req.merchant, skuId, req.body || {});
+    if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
     return res.json(result);
   } catch (err) {
     next(err);

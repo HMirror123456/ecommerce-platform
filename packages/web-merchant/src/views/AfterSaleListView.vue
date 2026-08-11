@@ -91,6 +91,19 @@ function getItems(row) {
   return Array.isArray(row?.items) ? row.items : [];
 }
 
+function getReasonText(row) {
+  return row?.reason || '-';
+}
+
+function getReadonlyActionText(row) {
+  if (row?.status === 'ESCALATED') return '待平台仲裁';
+  if (row?.status === 'APPROVED' && row?.type === 'RETURN_REFUND') return '等待用户寄回';
+  if (row?.status === 'APPROVED') return '商家已同意';
+  if (row?.status === 'REJECTED') return '已拒绝';
+  if (row?.status === 'REFUNDED') return '已退款';
+  return '-';
+}
+
 async function loadAfterSales() {
   loading.value = true;
   try {
@@ -114,6 +127,10 @@ function resetFilters() {
 
 async function approve(row) {
   if (!row?.afterSaleId || processingId.value) return;
+  if (row.status !== 'APPLIED') {
+    ElMessage.warning('当前售后状态不允许同意');
+    return;
+  }
   try {
     await ElMessageBox.confirm(
       row.type === 'RETURN_REFUND'
@@ -143,6 +160,10 @@ async function approve(row) {
 
 async function reject(row) {
   if (!row?.afterSaleId || processingId.value) return;
+  if (row.status !== 'APPLIED') {
+    ElMessage.warning('当前售后状态不允许拒绝');
+    return;
+  }
   let reason = '';
   try {
     const result = await ElMessageBox.prompt('请填写拒绝原因', '拒绝售后', {
@@ -172,6 +193,10 @@ async function reject(row) {
 
 async function confirmReturn(row) {
   if (!row?.afterSaleId || processingId.value) return;
+  if (row.status !== 'RETURNING') {
+    ElMessage.warning('仅退货中售后可以验收退款');
+    return;
+  }
   try {
     await ElMessageBox.confirm(
       '确认已收到退货并完成验收？确认后将退款并回滚库存。',
@@ -250,7 +275,13 @@ onMounted(loadAfterSales);
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="reason" label="申请原因" min-width="180" show-overflow-tooltip />
+      <el-table-column label="申请原因" min-width="220" show-overflow-tooltip>
+        <template #default="{ row }">
+          <el-tooltip :content="getReasonText(row)" placement="top" :disabled="getReasonText(row) === '-'">
+            <span class="reason-text">{{ getReasonText(row) }}</span>
+          </el-tooltip>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="130">
         <template #default="{ row }">
           <el-tag :type="getStatusTagType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
@@ -276,8 +307,24 @@ onMounted(loadAfterSales);
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <template v-if="row.status === 'APPLIED'">
-            <el-button link type="success" :loading="processingId === row.afterSaleId" @click="approve(row)">同意</el-button>
-            <el-button link type="danger" :disabled="!!processingId" @click="reject(row)">拒绝</el-button>
+            <el-button
+              link
+              type="success"
+              :disabled="!!processingId && processingId !== row.afterSaleId"
+              :loading="processingId === row.afterSaleId"
+              @click="approve(row)"
+            >
+              同意
+            </el-button>
+            <el-button
+              link
+              type="danger"
+              :disabled="!!processingId && processingId !== row.afterSaleId"
+              :loading="processingId === row.afterSaleId"
+              @click="reject(row)"
+            >
+              拒绝
+            </el-button>
           </template>
           <template v-else-if="row.status === 'RETURNING'">
             <el-button
@@ -289,10 +336,7 @@ onMounted(loadAfterSales);
               验收通过并退款
             </el-button>
           </template>
-          <span v-else-if="row.status === 'APPROVED' && row.type === 'RETURN_REFUND'" class="muted">
-            等待用户寄回
-          </span>
-          <span v-else class="muted">-</span>
+          <span v-else class="muted">{{ getReadonlyActionText(row) }}</span>
         </template>
       </el-table-column>
     </el-table>
@@ -335,6 +379,7 @@ onMounted(loadAfterSales);
 .item-line { display: flex; justify-content: space-between; gap: 12px; }
 .item-title { color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-meta { flex: none; color: #666; }
+.reason-text { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .muted { color: #999; }
 .summary {
   margin-top: 16px;

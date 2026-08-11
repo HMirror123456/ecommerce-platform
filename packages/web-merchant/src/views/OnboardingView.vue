@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { fetchOnboardingStatus, submitOnboardingApplication } from '@/api/merchant';
@@ -32,6 +32,10 @@ const statusMap = {
   REJECTED: { label: '已驳回', type: 'danger' },
 };
 
+const hasApproved = computed(() => statusList.value.some((item) => item.status === 'APPROVED'));
+const hasRejected = computed(() => statusList.value.some((item) => item.status === 'REJECTED'));
+const hasPending = computed(() => statusList.value.some((item) => item.status === 'PENDING'));
+
 function formatTime(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN');
@@ -55,13 +59,14 @@ async function onSubmit() {
 }
 
 async function loadStatus() {
-  if (!statusPhone.value.trim()) {
-    ElMessage.warning('请输入手机号');
+  const phone = statusPhone.value.trim();
+  if (!/^1\d{10}$/.test(phone)) {
+    ElMessage.warning('请输入有效手机号');
     return;
   }
   statusLoading.value = true;
   try {
-    const data = await fetchOnboardingStatus(statusPhone.value.trim());
+    const data = await fetchOnboardingStatus(phone);
     statusList.value = data.list || [];
   } catch (e) {
     statusList.value = [];
@@ -93,21 +98,23 @@ async function loadStatus() {
             <el-form-item label="联系电话" prop="contactPhone">
               <el-input v-model="form.contactPhone" placeholder="用于接收审核结果通知" maxlength="11" />
             </el-form-item>
-            <el-button type="primary" class="submit" :loading="loading" @click="onSubmit">提交入驻申请</el-button>
+            <el-button type="primary" class="submit" :loading="loading" :disabled="loading" @click="onSubmit">提交入驻申请</el-button>
           </el-form>
         </el-tab-pane>
 
         <el-tab-pane label="查询进度" name="status">
           <div class="status-query">
             <el-input v-model="statusPhone" placeholder="请输入申请时填写的手机号" maxlength="11" />
-            <el-button type="primary" :loading="statusLoading" @click="loadStatus">查询</el-button>
+            <el-button type="primary" :loading="statusLoading" :disabled="statusLoading" @click="loadStatus">查询</el-button>
           </div>
           <el-table v-loading="statusLoading" :data="statusList" stripe empty-text="暂无申请记录">
             <el-table-column prop="shopName" label="店铺名称" min-width="140" />
+            <el-table-column prop="contactName" label="联系人" width="110" />
+            <el-table-column prop="contactPhone" label="联系电话" width="130" />
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="statusMap[row.status]?.type" size="small">
-                  {{ statusMap[row.status]?.label }}
+                  {{ statusMap[row.status]?.label || row.status }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -125,7 +132,13 @@ async function loadStatus() {
             </el-table-column>
             <el-table-column prop="rejectReason" label="驳回原因" min-width="160" show-overflow-tooltip />
           </el-table>
-          <p v-if="statusList.some((r) => r.status === 'APPROVED')" class="success-tip">
+          <p v-if="hasPending" class="status-tip pending-tip">
+            申请待平台审核，请等待运营处理；商家端不会伪造审核结果。
+          </p>
+          <p v-if="hasRejected" class="status-tip reject-tip">
+            如申请被驳回，请根据驳回原因调整资料后重新提交。
+          </p>
+          <p v-if="hasApproved" class="status-tip success-tip">
             审核已通过，请使用上方商家账号登录（初始密码 123456）。
           </p>
         </el-tab-pane>
@@ -161,5 +174,8 @@ h1 { margin: 0; font-size: 22px; }
 .hint { margin: 0 0 20px; color: #999; font-size: 13px; line-height: 1.6; }
 .submit { width: 100%; margin-top: 8px; }
 .status-query { display: flex; gap: 12px; margin-bottom: 16px; }
-.success-tip { margin-top: 16px; color: #67c23a; font-size: 13px; }
+.status-tip { margin: 16px 0 0; font-size: 13px; line-height: 1.6; }
+.pending-tip { color: #e6a23c; }
+.reject-tip { color: #f56c6c; }
+.success-tip { color: #67c23a; }
 </style>

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { fetchMerchantOrders, shipMerchantOrder } from '@/api/merchant';
 
 const ORDER_STATUS_OPTIONS = [
@@ -119,6 +119,19 @@ function getShipment(row) {
   return row?.shipment || null;
 }
 
+function getReadonlyActionText(status) {
+  const textMap = {
+    PENDING_PAYMENT: '待用户支付',
+    PAID: '待系统流转',
+    SHIPPED: '已发货',
+    COMPLETED: '已完成',
+    CANCELLED: '已取消',
+    REFUNDING: '售后中',
+    REFUNDED: '已退款',
+  };
+  return textMap[status] || '-';
+}
+
 async function loadOrders() {
   loading.value = true;
   try {
@@ -157,11 +170,17 @@ function closeShipDialog() {
 }
 
 async function submitShipment() {
+  if (shipSubmitting.value) return;
   const valid = await shipFormRef.value?.validate().catch(() => false);
   if (!valid || !shipTarget.value) return;
 
   shipSubmitting.value = true;
   try {
+    await ElMessageBox.confirm(
+      `确认发货子订单 ${shipTarget.value.subOrderId}？提交后将写入物流信息并变为已发货。`,
+      '确认发货',
+      { confirmButtonText: '确认发货', cancelButtonText: '取消', type: 'warning' },
+    );
     const data = await shipMerchantOrder(shipTarget.value.subOrderId, {
       logisticsCompany: shipForm.value.logisticsCompany,
       trackingNo: shipForm.value.trackingNo,
@@ -170,7 +189,9 @@ async function submitShipment() {
     closeShipDialog();
     await loadOrders();
   } catch (e) {
-    ElMessage.error(e.message || '发货失败');
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(e.message || '发货失败');
+    }
   } finally {
     shipSubmitting.value = false;
   }
@@ -254,8 +275,16 @@ onMounted(loadOrders);
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="row.status === 'PENDING_SHIPMENT'" link type="primary" @click="openShipDialog(row)">发货</el-button>
-          <span v-else class="muted">-</span>
+          <el-button
+            v-if="row.status === 'PENDING_SHIPMENT'"
+            link
+            type="primary"
+            :disabled="shipSubmitting"
+            @click="openShipDialog(row)"
+          >
+            发货
+          </el-button>
+          <span v-else class="muted">{{ getReadonlyActionText(row.status) }}</span>
         </template>
       </el-table-column>
     </el-table>
@@ -279,7 +308,7 @@ onMounted(loadOrders);
     </el-form>
 
     <template #footer>
-      <el-button @click="closeShipDialog">取消</el-button>
+      <el-button :disabled="shipSubmitting" @click="closeShipDialog">取消</el-button>
       <el-button type="primary" :loading="shipSubmitting" @click="submitShipment">确认发货</el-button>
     </template>
   </el-dialog>

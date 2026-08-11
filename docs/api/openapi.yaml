@@ -797,6 +797,42 @@ paths:
       summary: 商家商品列表
       security:
         - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: 页码
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: 每页数量
+        - name: keyword
+          in: query
+          schema:
+            type: string
+          description: 搜索商品标题、商品 ID、类目 ID 或类目名称
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: keyword 的兼容别名
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProductStatus'
+          description: 商品状态筛选
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+          description: 类目筛选；传父类目时包含其子类目
       responses:
         '200':
           description: OK
@@ -804,6 +840,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MerchantProductListResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
     post:
       tags: [merchant]
       summary: 创建商品（SPU+SKU）
@@ -822,6 +864,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MerchantProduct'
+
+  /merchant/products/batch-submit-audit:
+    post:
+      tags: [merchant]
+      summary: 批量提交商品审核
+      description: 仅 DRAFT、REJECTED、OFF_SHELF 状态商品可提交审核；每个商品都会校验归属当前商家并返回成功/失败明细。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchMerchantProductRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMerchantProductResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /merchant/products/batch-off-shelf:
+    post:
+      tags: [merchant]
+      summary: 批量下架商品
+      description: 仅 ON_SHELF 状态商品可下架；每个商品都会校验归属当前商家并返回成功/失败明细。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchMerchantProductRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMerchantProductResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
 
   /merchant/products/{spuId}:
     get:
@@ -908,7 +1004,7 @@ paths:
     post:
       tags: [merchant]
       summary: 提交商品审核
-      description: 商品状态 DRAFT/REJECTED → PENDING_AUDIT
+      description: 商品状态 DRAFT/REJECTED/OFF_SHELF → PENDING_AUDIT；已下架商品重新上架需要重新提交平台审核。
       security:
         - bearerAuth: []
       parameters:
@@ -977,6 +1073,52 @@ paths:
                 $ref: '#/components/schemas/ErrorMessage'
         '409':
           description: Invalid State
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /merchant/skus/{skuId}/stock:
+    patch:
+      tags: [merchant]
+      summary: 调整 SKU 可用库存
+      description: |
+        商家只能调整自己商品下 SKU 的 `available` 可用库存，`locked` 锁定库存由下单/支付/取消/售后流程维护，不允许商家直接修改。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: skuId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMerchantSkuStockRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MerchantSkuStockResponse'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '404':
+          description: SKU 不存在
           content:
             application/json:
               schema:
@@ -2112,8 +2254,18 @@ components:
       properties:
         total:
           type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        items:
+          type: array
+          description: 当前页商品列表
+          items:
+            $ref: '#/components/schemas/MerchantProduct'
         list:
           type: array
+          description: 兼容旧调用的当前页商品列表，内容与 items 一致
           items:
             $ref: '#/components/schemas/MerchantProduct'
 
@@ -2175,6 +2327,23 @@ components:
         locked:
           type: integer
           minimum: 0
+
+    UpdateMerchantSkuStockRequest:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: integer
+          minimum: 0
+          description: 设置 SKU 当前可用库存；不能为负数。
+
+    MerchantSkuStockResponse:
+      type: object
+      properties:
+        skuId:
+          type: integer
+        stock:
+          $ref: '#/components/schemas/MerchantStock'
 
     CreateMerchantProductRequest:
       type: object
@@ -2255,6 +2424,48 @@ components:
           $ref: '#/components/schemas/ProductStatus'
         message:
           type: string
+
+    BatchMerchantProductRequest:
+      type: object
+      required: [spuIds]
+      properties:
+        spuIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+          description: 要批量操作的 SPU ID 列表
+
+    BatchMerchantProductResult:
+      type: object
+      properties:
+        spuId:
+          type: integer
+        success:
+          type: boolean
+        status:
+          $ref: '#/components/schemas/ProductStatus'
+        reason:
+          type: string
+          description: 失败原因；成功时可为空
+
+    BatchMerchantProductResponse:
+      type: object
+      properties:
+        successCount:
+          type: integer
+        failureCount:
+          type: integer
+        failures:
+          type: array
+          description: 失败原因列表
+          items:
+            $ref: '#/components/schemas/BatchMerchantProductResult'
+        results:
+          type: array
+          description: 每个 SPU 的处理结果
+          items:
+            $ref: '#/components/schemas/BatchMerchantProductResult'
 
     ErrorMessage:
       type: object

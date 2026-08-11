@@ -1,4 +1,4 @@
-/** Hybrid store: batch 1 + 3 in MySQL; SPU/SKU/stock still in-memory (batch 2). */
+/** Store facade over MySQL repositories; legacy product fixtures remain for older helper fallbacks. */
 
 import * as adminRepo from '../repositories/adminRepo.js';
 import * as merchantRepo from '../repositories/merchantRepo.js';
@@ -14,7 +14,7 @@ import * as stockRepo from '../repositories/stockRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
 
-// Batch 2: still in-memory (SPU/SKU/stock — see docs/DB_MIGRATION.md)
+// Legacy product fixtures; main category/product/stock flows use repository-backed MySQL data.
 export const categories = [
   {
     id: 1,
@@ -788,9 +788,34 @@ export async function getPublicProductDetail(spuId) {
   return productRepo.findPublicProductDetail(spuId);
 }
 
-export async function getMerchantProducts(merchant) {
+function normalizeMerchantProductQuery(query = {}) {
+  const page = Math.max(1, Number(query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
+  const status = query.status ? String(query.status) : undefined;
+  const keyword = String(query.keyword || query.q || '').trim();
+  return { page, pageSize, status, keyword };
+}
+
+function validateBatchSpuIds(payload) {
+  if (!Array.isArray(payload?.spuIds) || payload.spuIds.length === 0) {
+    return { error: 'INVALID_INPUT', message: 'spuIds is required' };
+  }
+  const spuIds = [...new Set(payload.spuIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!spuIds.length) return { error: 'INVALID_INPUT', message: 'spuIds is invalid' };
+  return { spuIds };
+}
+
+export async function getMerchantProducts(merchant, query = {}) {
   await expirePendingOrders();
-  return productRepo.listByMerchant(merchant.id);
+  const options = normalizeMerchantProductQuery(query);
+  if (query.categoryId != null && query.categoryId !== '') {
+    const categoryId = Number(query.categoryId);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      return { error: 'INVALID_INPUT', message: 'categoryId is invalid' };
+    }
+    options.categoryIds = await categoryRepo.getCategoryFilterIds(categoryId);
+  }
+  return productRepo.listByMerchant(merchant.id, options);
 }
 
 export async function getMerchantProductDetail(merchant, spuId) {
@@ -846,6 +871,22 @@ export async function updateMerchantProduct(merchant, spuId, payload) {
   return productRepo.updateMerchantProduct(merchant, spuId, payload);
 }
 
+export async function updateMerchantSkuStock(merchant, skuId, payload) {
+  await expirePendingOrders();
+  const id = Number(skuId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return { error: 'INVALID_INPUT', message: 'SKU id is invalid' };
+  }
+  if (payload?.available == null || payload.available === '') {
+    return { error: 'INVALID_INPUT', message: 'available is required' };
+  }
+  const available = Number(payload.available);
+  if (!Number.isInteger(available) || available < 0) {
+    return { error: 'INVALID_INPUT', message: 'available must be a non-negative integer' };
+  }
+  return productRepo.updateMerchantSkuStock(merchant, id, available);
+}
+
 export async function submitMerchantProductAudit(merchant, spuId) {
   await expirePendingOrders();
   return productRepo.submitMerchantProductAudit(merchant, spuId);
@@ -854,6 +895,20 @@ export async function submitMerchantProductAudit(merchant, spuId) {
 export async function offShelfMerchantProduct(merchant, spuId) {
   await expirePendingOrders();
   return productRepo.offShelfMerchantProduct(merchant, spuId);
+}
+
+export async function batchSubmitMerchantProductAudit(merchant, payload) {
+  await expirePendingOrders();
+  const validation = validateBatchSpuIds(payload);
+  if (validation.error) return validation;
+  return productRepo.batchSubmitMerchantProductAudit(merchant, validation.spuIds);
+}
+
+export async function batchOffShelfMerchantProducts(merchant, payload) {
+  await expirePendingOrders();
+  const validation = validateBatchSpuIds(payload);
+  if (validation.error) return validation;
+  return productRepo.batchOffShelfMerchantProducts(merchant, validation.spuIds);
 }
 
 export async function auditProduct(spuId, adminId, approved, reason) {
