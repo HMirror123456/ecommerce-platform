@@ -27,7 +27,7 @@ tags:
   - name: admin
     description: 平台管理
   - name: chat
-    description: 售后客服会话（USER_CS）
+    description: 售后沟通会话（USER_CS / USER_MERCHANT）
 
 paths:
   # ========== Auth ==========
@@ -1626,7 +1626,7 @@ paths:
         '200':
           description: OK
 
-  # ========== Chat (USER_CS) ==========
+  # ========== Chat (USER_CS / USER_MERCHANT) ==========
   /after-sales/{afterSaleId}/chat/thread:
     post:
       tags: [chat]
@@ -1657,11 +1657,71 @@ paths:
         '404':
           description: 售后不存在
 
+  /after-sales/{afterSaleId}/merchant-chat/thread:
+    post:
+      tags: [chat]
+      summary: 用户开聊或获取已有 USER_MERCHANT 会话（幂等）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已有会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '201':
+          description: 新建会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 非本人售后
+        '404':
+          description: 售后不存在
+
+  /merchant/after-sales/{afterSaleId}/chat/thread:
+    post:
+      tags: [chat]
+      summary: 商家开聊或获取本店售后的 USER_MERCHANT 会话（幂等）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已有会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '201':
+          description: 新建会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 非本店售后
+        '404':
+          description: 售后不存在
+
   /chat/threads:
     get:
       tags: [chat]
       summary: 会话列表
-      description: 用户仅见自己的 USER_CS；CS_AGENT/SUPER_ADMIN 见全部
+      description: 用户仅见自己的 USER_CS；商家仅见本店 USER_MERCHANT；CS_AGENT/SUPER_ADMIN 仅见全部 USER_CS
       security:
         - bearerAuth: []
       parameters:
@@ -1794,7 +1854,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [USER_CS]
+          enum: [USER_CS, USER_MERCHANT]
         afterSaleId:
           type: integer
         orderId:
@@ -1803,6 +1863,10 @@ components:
           type: string
         userId:
           type: integer
+        merchantId:
+          type: integer
+          nullable: true
+          description: USER_MERCHANT 会话由关联售后单解析的所属商家
         status:
           type: string
           enum: [OPEN, CLOSED]
@@ -1824,7 +1888,7 @@ components:
           type: integer
         senderType:
           type: string
-          enum: [USER, CS_AGENT, SYSTEM]
+          enum: [USER, MERCHANT, CS_AGENT, SYSTEM]
         senderId:
           type: integer
           nullable: true

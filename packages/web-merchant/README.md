@@ -98,55 +98,6 @@ npm run dev
 6. 进入 `/orders`，测试订单搜索、状态筛选；待发货订单可点击发货。
 7. 进入 `/after-sales`，筛选“待商家处理”，对 `APPLIED` 售后执行同意或拒绝；对 `RETURNING` 售后执行验收退款；`ESCALATED` 仅展示“待平台仲裁”。
 
-## 联调验证
-
-先启动 API，再从仓库根目录运行：
-
-```bash
-node scripts/verify-merchant-onboarding.mjs
-node scripts/verify-merchant-product-flow.mjs
-node scripts/verify-merchant-product-batch.mjs
-node scripts/verify-merchant-shipping.mjs
-node scripts/verify-merchant-stock.mjs
-node scripts/verify-merchant-after-sale.mjs
-node scripts/verify-merchant-permissions.mjs
-node scripts/verify-merchant-all.mjs
-node scripts/cleanup-merchant-test-data.mjs --dry-run
-node scripts/cleanup-merchant-test-data.mjs
-node scripts/prepare-merchant-demo-data.mjs --clean
-```
-
-或在 `packages/web-merchant` 目录运行：
-
-```bash
-node ../../scripts/verify-merchant-onboarding.mjs
-node ../../scripts/verify-merchant-product-flow.mjs
-node ../../scripts/verify-merchant-product-batch.mjs
-node ../../scripts/verify-merchant-shipping.mjs
-node ../../scripts/verify-merchant-stock.mjs
-node ../../scripts/verify-merchant-after-sale.mjs
-node ../../scripts/verify-merchant-permissions.mjs
-node ../../scripts/verify-merchant-all.mjs
-node ../../scripts/cleanup-merchant-test-data.mjs --dry-run
-node ../../scripts/cleanup-merchant-test-data.mjs
-node ../../scripts/prepare-merchant-demo-data.mjs --clean
-```
-
-## Demo 与报告素材
-
-- Demo 演示路径：[`docs/demo/MERCHANT_DEMO.md`](../../docs/demo/MERCHANT_DEMO.md)
-- 报告素材草稿：[`docs/report/MERCHANT_SECTION_DRAFT.md`](../../docs/report/MERCHANT_SECTION_DRAFT.md)
-
-## 说明
-
-- 商品列表搜索、筛选和分页走服务端接口；订单和售后列表仍为当前页面本地筛选。
-- 验证脚本会在本地 MySQL 中生成商品、订单、售后和入驻申请等测试数据。自动验收运行 `node scripts/verify-merchant-all.mjs`；页面演示不建议反复运行总验收脚本，避免列表数据持续增多。
-- 页面演示前可先执行 `node scripts/cleanup-merchant-test-data.mjs --dry-run` 查看范围，再执行 `node scripts/prepare-merchant-demo-data.mjs --clean` 清理旧测试数据并生成少量中文演示数据；这些脚本只面向本地联调，不是生产级数据清理工具。
-- 订单为空是正常情况，需要用户下单并支付后才会出现待发货订单。
-- 商家端不实现 Admin 入驻审核页面；验证脚本仅复用已有 Admin 审核接口辅助联调。
-- 商家端不实现用户售后申请和 Admin 平台仲裁，只处理商家审核与退货验收。
-- 当前不包含商品删除、真实图片上传、独立库存管理页面、真实退款、真实物流。
-
 ## 常见问题与排查
 
 - API 旧进程导致新路由 404：停止旧的 `packages/api` dev 进程并重新启动。
