@@ -115,49 +115,63 @@ onMounted(loadList);
 <template>
   <div class="address-page" v-loading="loading">
     <div class="page-header">
-      <h2 class="page-title">收货地址</h2>
+      <div>
+        <h2 class="page-title">收货地址</h2>
+        <p class="page-sub">管理下单时使用的收货信息</p>
+      </div>
       <el-button type="primary" @click="openCreate">新增地址</el-button>
     </div>
 
-    <el-empty v-if="!loading && list.length === 0" description="暂无收货地址" />
+    <el-empty v-if="!loading && list.length === 0" description="暂无收货地址">
+      <el-button type="primary" @click="openCreate">添加第一个地址</el-button>
+    </el-empty>
 
-    <div v-else class="address-list">
-      <el-card v-for="row in list" :key="row.id" shadow="never" class="address-card">
+    <div v-else class="address-grid">
+      <article
+        v-for="row in list"
+        :key="row.id"
+        class="address-card"
+        :class="{ default: row.isDefault }"
+      >
+        <span v-if="row.isDefault" class="default-ribbon">默认</span>
         <div class="address-top">
-          <div>
+          <p class="name-line">
             <span class="name">{{ row.receiverName }}</span>
             <span class="phone">{{ row.phone }}</span>
-            <el-tag v-if="row.isDefault" size="small" type="success">默认</el-tag>
-          </div>
-          <div class="actions">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" @click="onDelete(row)">删除</el-button>
-            <el-button v-if="!row.isDefault" link @click="onSetDefault(row)">设为默认</el-button>
-          </div>
+          </p>
         </div>
         <p class="detail">{{ fullAddress(row) }}</p>
-      </el-card>
+        <div class="actions">
+          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" @click="onDelete(row)">删除</el-button>
+          <el-button v-if="!row.isDefault" link type="primary" @click="onSetDefault(row)">
+            设为默认
+          </el-button>
+        </div>
+      </article>
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑地址' : '新增地址'" width="480px">
       <el-form label-position="top">
         <el-form-item label="收件人" required>
-          <el-input v-model="form.receiverName" />
+          <el-input v-model="form.receiverName" placeholder="请输入收件人姓名" />
         </el-form-item>
         <el-form-item label="手机号" required>
-          <el-input v-model="form.phone" />
+          <el-input v-model="form.phone" placeholder="请输入手机号" />
         </el-form-item>
-        <el-form-item label="省" required>
-          <el-input v-model="form.province" />
-        </el-form-item>
-        <el-form-item label="市" required>
-          <el-input v-model="form.city" />
-        </el-form-item>
-        <el-form-item label="区/县" required>
-          <el-input v-model="form.district" />
-        </el-form-item>
+        <div class="region-row">
+          <el-form-item label="省" required>
+            <el-input v-model="form.province" />
+          </el-form-item>
+          <el-form-item label="市" required>
+            <el-input v-model="form.city" />
+          </el-form-item>
+          <el-form-item label="区/县" required>
+            <el-input v-model="form.district" />
+          </el-form-item>
+        </div>
         <el-form-item label="详细地址" required>
-          <el-input v-model="form.detail" type="textarea" :rows="2" />
+          <el-input v-model="form.detail" type="textarea" :rows="2" placeholder="街道门牌等" />
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.isDefault">设为默认地址</el-checkbox>
@@ -174,20 +188,116 @@ onMounted(loadList);
 <style scoped>
 .page-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-.page-title { margin: 0; font-size: 20px; }
-.address-list { display: flex; flex-direction: column; gap: 12px; }
-.address-top {
-  display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 16px;
 }
-.name { font-weight: 600; margin-right: 12px; }
-.phone { color: var(--text-body); margin-right: 8px; }
-.detail { margin: 8px 0 0; color: var(--text-body); }
-.actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.page-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.address-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .address-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.address-card {
+  position: relative;
+  padding: 18px 16px 14px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.address-card:hover {
+  border-color: #ffb4b4;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+}
+
+.address-card.default {
+  border-color: var(--color-primary);
+  background: #fff8f8;
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.default-ribbon {
+  position: absolute;
+  top: 10px;
+  right: -22px;
+  width: 88px;
+  padding: 2px 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--color-primary);
+  transform: rotate(35deg);
+  letter-spacing: 0.04em;
+}
+
+.address-top {
+  margin-bottom: 8px;
+  padding-right: 36px;
+}
+
+.name-line {
+  margin: 0;
+}
+
+.name {
+  font-weight: 700;
+  margin-right: 10px;
+  color: var(--text-title);
+}
+
+.phone {
+  color: var(--text-body);
+  font-size: 13px;
+}
+
+.detail {
+  margin: 0 0 12px;
+  color: var(--text-body);
+  line-height: 1.6;
+  font-size: 13px;
+  min-height: 42px;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.region-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .region-row {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

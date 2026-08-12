@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import { ChatDotRound, Shop } from '@element-plus/icons-vue';
 import { fetchChatThreads } from '@/api/chat';
 import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
 
@@ -118,17 +119,40 @@ onMounted(loadThreads);
         <h2 class="page-title">我的售后会话</h2>
         <p class="page-subtitle">与平台客服、商家的售后沟通记录</p>
       </div>
-      <div class="filters">
-        <el-radio-group v-model="typeFilter" size="small" @change="loadThreads">
-          <el-radio-button label="ALL">全部类型</el-radio-button>
-          <el-radio-button label="USER_CS">平台客服</el-radio-button>
-          <el-radio-button label="USER_MERCHANT">商家</el-radio-button>
-        </el-radio-group>
-        <el-radio-group v-model="statusFilter" size="small" @change="loadThreads">
-          <el-radio-button label="OPEN">进行中</el-radio-button>
-          <el-radio-button label="CLOSED">已关闭</el-radio-button>
-          <el-radio-button label="ALL">全部状态</el-radio-button>
-        </el-radio-group>
+    </div>
+
+    <div class="filters">
+      <div class="filter-group">
+        <button
+          v-for="opt in [
+            { label: '全部类型', value: 'ALL' },
+            { label: '平台客服', value: 'USER_CS' },
+            { label: '商家', value: 'USER_MERCHANT' },
+          ]"
+          :key="`type-${opt.value}`"
+          type="button"
+          class="filter-chip"
+          :class="{ active: typeFilter === opt.value }"
+          @click="typeFilter = opt.value; loadThreads()"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+      <div class="filter-group">
+        <button
+          v-for="opt in [
+            { label: '进行中', value: 'OPEN' },
+            { label: '已关闭', value: 'CLOSED' },
+            { label: '全部状态', value: 'ALL' },
+          ]"
+          :key="`status-${opt.value}`"
+          type="button"
+          class="filter-chip"
+          :class="{ active: statusFilter === opt.value }"
+          @click="statusFilter = opt.value; loadThreads()"
+        >
+          {{ opt.label }}
+        </button>
       </div>
     </div>
 
@@ -144,17 +168,28 @@ onMounted(loadThreads);
         v-for="row in threads"
         :key="row.id"
         class="thread-card"
+        :class="{ open: row.status === 'OPEN' }"
         @click="openChat(row)"
       >
+        <div
+          class="avatar"
+          :class="row.type === 'USER_MERCHANT' ? 'merchant' : 'cs'"
+        >
+          <el-icon>
+            <Shop v-if="row.type === 'USER_MERCHANT'" />
+            <ChatDotRound v-else />
+          </el-icon>
+          <span v-if="row.status === 'OPEN'" class="alive-dot" title="进行中" />
+        </div>
         <div class="thread-main">
           <div class="title-row">
             <h3 class="title">订单 {{ row.orderNo || '-' }}</h3>
-            <el-tag size="small" :type="row.type === 'USER_MERCHANT' ? 'warning' : ''">
+            <span class="type-pill" :class="row.type === 'USER_MERCHANT' ? 'merchant' : 'cs'">
               {{ threadTypeLabel(row.type) }}
-            </el-tag>
-            <el-tag size="small" :type="row.status === 'OPEN' ? 'success' : 'info'">
+            </span>
+            <span class="status-pill" :class="row.status === 'OPEN' ? 'open' : 'closed'">
               {{ threadStatusLabel(row.status) }}
-            </el-tag>
+            </span>
           </div>
           <p class="meta">
             售后 #{{ row.afterSaleId }}
@@ -184,53 +219,129 @@ onMounted(loadThreads);
 
 <style scoped>
 .page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
+
 .page-title {
-  margin: 0 0 6px;
-  font-size: 20px;
+  margin: 0 0 4px;
+  font-size: 22px;
 }
+
 .page-subtitle {
   margin: 0;
   font-size: 13px;
   color: var(--text-muted);
 }
+
 .filters {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 16px;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
+
+.filter-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: #fafafa;
+  color: var(--text-body);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-chip:hover {
+  border-color: #ffb4b4;
+  color: var(--color-primary);
+}
+
+.filter-chip.active {
+  background: #fff1f0;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
 .thread-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
 .thread-card {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   padding: 16px;
   background: #fff;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
+
 .thread-card:hover {
-  border-color: var(--color-primary);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  border-color: #ffb4b4;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
 }
+
+.thread-card.open {
+  border-left: 3px solid var(--color-primary);
+}
+
+.avatar {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.avatar.cs {
+  background: linear-gradient(135deg, #e4393c, #ff7875);
+}
+
+.avatar.merchant {
+  background: linear-gradient(135deg, #fa8c16, #ffc069);
+}
+
+.alive-dot {
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #52c41a;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.45);
+  animation: pulse 1.6s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(82, 196, 26, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0); }
+}
+
 .thread-main {
   min-width: 0;
   flex: 1;
 }
+
 .title-row {
   display: flex;
   align-items: center;
@@ -238,37 +349,70 @@ onMounted(loadThreads);
   margin-bottom: 6px;
   flex-wrap: wrap;
 }
+
 .title {
   margin: 0;
   font-size: 15px;
+  font-weight: 700;
+}
+
+.type-pill,
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 600;
 }
+
+.type-pill.cs {
+  background: #fff1f0;
+  color: var(--color-primary);
+}
+
+.type-pill.merchant {
+  background: #fff7e6;
+  color: #d48806;
+}
+
+.status-pill.open {
+  background: #f6ffed;
+  color: #389e0d;
+}
+
+.status-pill.closed {
+  background: #f5f5f5;
+  color: var(--text-muted);
+}
+
 .meta,
 .time {
   margin: 0;
   font-size: 13px;
   color: var(--text-muted);
 }
+
 .time {
   margin-top: 4px;
   font-size: 12px;
 }
+
 .thread-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
+
 @media (max-width: 640px) {
   .thread-card {
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
   }
+
   .thread-actions {
+    width: 100%;
     justify-content: flex-end;
-  }
-  .filters {
-    align-items: stretch;
   }
 }
 </style>

@@ -59,6 +59,12 @@ function formatPrice(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
 }
 
+function splitPrice(value) {
+  const fixed = Number(value || 0).toFixed(2);
+  const [integer, decimal] = fixed.split('.');
+  return { integer, decimal };
+}
+
 function formatSpec(specJson) {
   if (!specJson || typeof specJson !== 'object') return '-';
   return Object.entries(specJson)
@@ -286,11 +292,21 @@ onMounted(() => loadCart({ selectAll: true }));
       </el-empty>
 
       <template v-else-if="filteredItems.length > 0">
-        <p class="page-subtitle">
-          共 {{ filteredItems.length }} 件
-          <template v-if="appliedKeyword">（关键词「{{ appliedKeyword }}」）</template>
-          <template v-if="invalidCount > 0">（含 {{ invalidCount }} 件失效）</template>
-        </p>
+        <div class="page-meta">
+          <p class="page-subtitle">
+            共 {{ filteredItems.length }} 件
+            <template v-if="appliedKeyword">（关键词「{{ appliedKeyword }}」）</template>
+          </p>
+          <el-button
+            v-if="invalidCount > 0"
+            size="small"
+            type="danger"
+            plain
+            @click="onClearInvalid"
+          >
+            清除 {{ invalidCount }} 件失效
+          </el-button>
+        </div>
 
         <el-card shadow="never" class="cart-card">
           <div class="cart-header">
@@ -333,6 +349,7 @@ onMounted(() => loadCart({ selectAll: true }));
                   {{ formatSpec(row.sku?.specJson) }}
                 </p>
                 <p v-if="!isInvalid(row)" class="stock">库存 {{ row.sku?.stock ?? 0 }} 件</p>
+                <p v-else class="invalid-hint">商品已失效，无法结算</p>
               </div>
             </div>
 
@@ -380,14 +397,6 @@ onMounted(() => loadCart({ selectAll: true }));
               继续购物
             </el-button>
             <el-button
-              v-if="invalidCount > 0"
-              link
-              type="danger"
-              @click="onClearInvalid"
-            >
-              清除失效商品
-            </el-button>
-            <el-button
               link
               type="primary"
               :disabled="selectedValidItems.length === 0"
@@ -400,12 +409,15 @@ onMounted(() => loadCart({ selectAll: true }));
           </div>
           <div class="footer-right">
             <div class="total">
-              合计：
-              <span class="total-amount">{{ formatPrice(totalAmount) }}</span>
+              <span class="total-label">合计</span>
+              <span class="total-amount">
+                <i>¥</i>{{ splitPrice(totalAmount).integer }}.{{ splitPrice(totalAmount).decimal }}
+              </span>
             </div>
             <el-button
               type="primary"
               size="large"
+              class="checkout-btn"
               :disabled="selectedValidItems.length === 0"
               @click="goCheckout"
             >
@@ -421,11 +433,11 @@ onMounted(() => loadCart({ selectAll: true }));
 <style scoped>
 .cart-page {
   width: 100%;
-  padding-bottom: 32px;
+  padding-bottom: 96px;
 }
 
 .cart-toolbar {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   display: flex;
   justify-content: flex-end;
 }
@@ -435,16 +447,25 @@ onMounted(() => loadCart({ selectAll: true }));
   min-height: 160px;
 }
 
+.page-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .page-subtitle {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: 13px;
   color: var(--text-muted);
-  text-align: left;
 }
 
 .cart-card {
   margin-bottom: 16px;
   border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .cart-card :deep(.el-card__body) {
@@ -465,23 +486,44 @@ onMounted(() => loadCart({ selectAll: true }));
   font-size: 13px;
   color: var(--text-muted);
   font-weight: 500;
+  background: #fafafa;
+  margin: 0 -20px;
+  padding-left: 20px;
+  padding-right: 20px;
 }
 
 .cart-row {
   padding: 16px 0;
   border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s;
 }
 
 .cart-row:last-child {
   border-bottom: none;
 }
 
-.cart-row.invalid {
-  opacity: 0.72;
-  background: #fafafa;
+.cart-row:hover:not(.invalid) {
+  background: #fffafa;
   margin: 0 -20px;
   padding-left: 20px;
   padding-right: 20px;
+}
+
+.cart-row.invalid {
+  background: #f7f7f7;
+  margin: 0 -20px;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+.cart-row.invalid .thumb {
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+
+.cart-row.invalid .title {
+  color: var(--text-muted);
+  text-decoration: line-through;
 }
 
 .col-check {
@@ -520,9 +562,10 @@ onMounted(() => loadCart({ selectAll: true }));
   width: 80px;
   height: 80px;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid var(--border-color);
   display: block;
+  background: #fafafa;
 }
 
 .thumb.placeholder {
@@ -538,11 +581,11 @@ onMounted(() => loadCart({ selectAll: true }));
   position: absolute;
   left: 0;
   top: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.6);
   color: #fff;
   font-size: 12px;
   padding: 1px 6px;
-  border-radius: 4px 0 4px 0;
+  border-radius: 6px 0 6px 0;
 }
 
 .product-text {
@@ -561,11 +604,16 @@ onMounted(() => loadCart({ selectAll: true }));
 }
 
 .meta,
-.stock {
+.stock,
+.invalid-hint {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.invalid-hint {
+  color: var(--color-error, #f56c6c);
 }
 
 .subtotal-value {
@@ -578,21 +626,26 @@ onMounted(() => loadCart({ selectAll: true }));
 }
 
 .cart-footer {
+  position: sticky;
+  bottom: 12px;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 16px 24px;
+  padding: 14px 20px;
   background: #fff;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--border-color);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1);
 }
 
 .footer-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .footer-hint {
@@ -608,13 +661,33 @@ onMounted(() => loadCart({ selectAll: true }));
 }
 
 .total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   color: var(--text-body);
 }
 
+.total-label {
+  font-size: 13px;
+}
+
 .total-amount {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 26px;
+  font-weight: 800;
   color: var(--color-primary);
+  line-height: 1;
+}
+
+.total-amount i {
+  font-style: normal;
+  font-size: 16px;
+  margin-right: 1px;
+}
+
+.checkout-btn {
+  min-width: 132px;
+  height: 44px;
+  font-size: 16px;
 }
 
 @media (max-width: 768px) {
