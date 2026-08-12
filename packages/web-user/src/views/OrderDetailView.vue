@@ -9,6 +9,7 @@ import {
   fetchOrder,
   submitAfterSaleReturn,
 } from '@/api/order';
+import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
 
 const ORDER_STATUS_LABELS = {
   PENDING_PAYMENT: '待支付',
@@ -55,6 +56,9 @@ const returnForm = ref({
   logisticsCompany: '',
   trackingNo: '',
 });
+
+const chatVisible = ref(false);
+const chatAfterSaleId = ref(null);
 
 const canApplyAfterSale = computed(() => {
   if (!order.value) return false;
@@ -140,6 +144,7 @@ async function onEscalate(afterSale) {
     await escalateAfterSale(orderId.value, afterSale.afterSaleId);
     ElMessage.success('已申请平台介入');
     await loadOrder();
+    openCsChat(afterSale);
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message || '升级失败');
   }
@@ -147,6 +152,15 @@ async function onEscalate(afterSale) {
 
 function canEscalate(afterSale) {
   return afterSale.status === 'APPLIED' || afterSale.status === 'REJECTED';
+}
+
+function canContactCs(afterSale) {
+  return afterSale && afterSale.status !== 'REFUNDED';
+}
+
+function openCsChat(afterSale) {
+  chatAfterSaleId.value = afterSale.afterSaleId;
+  chatVisible.value = true;
 }
 
 function canSubmitReturn(afterSale) {
@@ -280,6 +294,15 @@ onMounted(loadOrder);
               申请平台介入
             </el-button>
             <el-button
+              v-if="canContactCs(as)"
+              type="primary"
+              plain
+              size="small"
+              @click="openCsChat(as)"
+            >
+              联系平台客服
+            </el-button>
+            <el-button
               v-if="canSubmitReturn(as)"
               type="primary"
               size="small"
@@ -349,6 +372,8 @@ onMounted(loadOrder);
         <el-button type="primary" :loading="returnSubmitting" @click="onSubmitReturn">提交寄回</el-button>
       </template>
     </el-dialog>
+
+    <AfterSaleChatDrawer v-model="chatVisible" :after-sale-id="chatAfterSaleId" />
   </div>
 </template>
 

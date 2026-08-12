@@ -96,6 +96,8 @@
 | 商品审核 | ProductAudit | 平台上架前的合规审核 | — |
 | 商家审核 | MerchantAudit | 入驻资质审核 | — |
 | 售后升级 | ESCALATED | 商家超时或用户申诉，待平台仲裁 | — |
+| 售后客服会话 | USER_CS | 用户与平台客服围绕售后的轻量沟通 | 见 CHAT.md |
+| 用户商家沟通 | USER_MERCHANT | 用户与商家售后协商（文档预留，未实现） | 见 CHAT.md |
 
 ---
 

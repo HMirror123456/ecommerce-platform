@@ -10,6 +10,7 @@ import merchantRoutes from './routes/merchant.js';
 import productsRoutes from './routes/products.js';
 import usersRoutes from './routes/users.js';
 import favoritesRoutes from './routes/favorites.js';
+import chatRoutes from './routes/chat.js';
 import { checkDbConnection } from './db/pool.js';
 
 const app = express();
@@ -28,6 +29,7 @@ app.use('/api/categories', categoriesRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/merchant', merchantRoutes);
 app.use('/api/products', productsRoutes);
+app.use('/api', chatRoutes);
 app.use((_req, res) => res.status(404).json({ message: 'Not Found' }));
 
 app.use((err, _req, res, _next) => {

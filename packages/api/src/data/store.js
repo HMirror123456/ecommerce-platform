@@ -11,6 +11,7 @@ import * as favoriteRepo from '../repositories/favoriteRepo.js';
 import * as categoryRepo from '../repositories/categoryRepo.js';
 import * as productRepo from '../repositories/productRepo.js';
 import * as stockRepo from '../repositories/stockRepo.js';
+import * as chatRepo from '../repositories/chatRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -1147,6 +1148,11 @@ export async function escalateAfterSale(userId, orderId, afterSaleId) {
   if (order.status !== 'REFUNDING') {
     await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
   }
+  try {
+    await ensureUserCsThread(userId, afterSaleId);
+  } catch (err) {
+    console.warn('auto create chat thread failed:', err.message);
+  }
   return { afterSale: afterSaleRepo.serialize(updated) };
 }
 
@@ -1454,4 +1460,184 @@ export async function auditMerchantApplication(applicationId, adminId, approved,
     return { error: 'REASON_REQUIRED', message: '驳回须填写原因' };
   }
   return merchantApplicationRepo.auditApplication(applicationId, adminId, approved, reason);
+}
+
+function buildAfterSaleCardPayload(item) {
+  const amount = (item.items || []).reduce(
+    (sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 0),
+    0,
+  );
+  return {
+    afterSaleId: item.afterSaleId,
+    orderId: item.orderId,
+    orderNo: item.orderNo,
+    shopName: item.shopName,
+    type: item.type,
+    status: item.status,
+    reason: item.reason,
+    amount,
+  };
+}
+
+async function enrichThread(thread) {
+  if (!thread) return null;
+  const item = await afterSaleRepo.findById(thread.afterSaleId);
+  return {
+    ...thread,
+    afterSaleStatus: item ? item.status : null,
+  };
+}
+
+async function assertThreadAccess(actor, thread) {
+  if (!thread) return { error: 'NOT_FOUND', message: '会话不存在' };
+  if (actor.kind === 'user' && thread.userId !== actor.user.id) {
+    return { error: 'FORBIDDEN', message: '无权访问该会话' };
+  }
+  if (actor.kind === 'admin') return null;
+  if (actor.kind === 'user') return null;
+  return { error: 'FORBIDDEN', message: '无权访问该会话' };
+}
+
+/** 幂等：用户开聊 / 取已有 USER_CS 会话 */
+export async function ensureUserCsThread(userId, afterSaleId) {
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+  if (item.userId !== userId) return { error: 'FORBIDDEN', message: '无权操作该售后' };
+
+  const existing = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_CS');
+  if (existing) {
+    return { thread: await enrichThread(existing), created: false };
+  }
+
+  let thread;
+  try {
+    thread = await chatRepo.createThread({
+      afterSaleId: item.afterSaleId,
+      orderId: item.orderId,
+      orderNo: item.orderNo,
+      userId: item.userId,
+      type: 'USER_CS',
+    });
+  } catch (err) {
+    // unique race
+    const again = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_CS');
+    if (again) return { thread: await enrichThread(again), created: false };
+    throw err;
+  }
+
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'TEXT',
+    content: '已接入平台客服会话，请描述您的问题。客服可查看订单与售后卡片并协助仲裁。',
+    payload: null,
+  });
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'CARD',
+    content: '售后订单卡片',
+    payload: buildAfterSaleCardPayload(item),
+  });
+
+  return { thread: await enrichThread(thread), created: true };
+}
+
+export async function listChatThreads(actor, { status } = {}) {
+  if (actor.kind === 'admin') {
+    const list = await chatRepo.listThreadsForCs({ status });
+    return Promise.all(list.map(enrichThread));
+  }
+  const list = await chatRepo.listThreadsForUser(actor.user.id, { status });
+  return Promise.all(list.map(enrichThread));
+}
+
+export async function getChatMessages(actor, threadId, { afterId } = {}) {
+  const thread = await chatRepo.findThreadById(threadId);
+  const denied = await assertThreadAccess(actor, thread);
+  if (denied) return denied;
+  const list = await chatRepo.listMessages(threadId, { afterId });
+  return { list };
+}
+
+export async function postChatMessage(actor, threadId, body = {}) {
+  const thread = await chatRepo.findThreadById(threadId);
+  const denied = await assertThreadAccess(actor, thread);
+  if (denied) return denied;
+  if (thread.status !== 'OPEN') return { error: 'INVALID', message: '会话已关闭' };
+
+  const msgType = body.msgType || 'TEXT';
+  if (msgType !== 'TEXT' && msgType !== 'CARD') {
+    return { error: 'INVALID', message: 'msgType 仅支持 TEXT / CARD' };
+  }
+
+  let content = (body.content || '').trim();
+  let payload = body.payload || null;
+
+  if (msgType === 'TEXT') {
+    if (!content) return { error: 'INVALID', message: '消息内容不能为空' };
+  } else {
+    const item = await afterSaleRepo.findById(thread.afterSaleId);
+    if (!item) return { error: 'NOT_FOUND', message: '关联售后不存在' };
+    payload = payload || buildAfterSaleCardPayload(item);
+    content = content || '售后订单卡片';
+  }
+
+  const senderType = actor.kind === 'admin' ? 'CS_AGENT' : 'USER';
+  const senderId = actor.kind === 'admin' ? actor.admin.id : actor.user.id;
+  const message = await chatRepo.createMessage({
+    threadId,
+    senderType,
+    senderId,
+    msgType,
+    content,
+    payload,
+  });
+  return { message };
+}
+
+export async function runChatAction(admin, threadId, actionKey, body = {}) {
+  const thread = await chatRepo.findThreadById(threadId);
+  if (!thread) return { error: 'NOT_FOUND', message: '会话不存在' };
+
+  const key = String(actionKey || '').toUpperCase();
+  if (key === 'HINT_RETURN') {
+    const message = await chatRepo.createMessage({
+      threadId,
+      senderType: 'SYSTEM',
+      senderId: admin.id,
+      msgType: 'QUICK_ACTION',
+      content: '【客服建议】请按页面指引填写退货物流信息寄回商品，商家验收后将完成退款。',
+      payload: { actionKey: 'HINT_RETURN' },
+    });
+    return { message };
+  }
+
+  if (key !== 'CS_APPROVE' && key !== 'CS_REJECT') {
+    return { error: 'INVALID', message: '未知 actionKey' };
+  }
+
+  const approved = key === 'CS_APPROVE';
+  const reason = body.reason || (approved ? '平台客服仲裁同意' : '平台客服仲裁拒绝');
+  if (!approved && !String(body.reason || '').trim()) {
+    return { error: 'REASON_REQUIRED', message: '拒绝须填写原因' };
+  }
+
+  const arb = await arbitrateAfterSale(thread.afterSaleId, { approved, reason });
+  if (arb.error) return arb;
+
+  const message = await chatRepo.createMessage({
+    threadId,
+    senderType: 'SYSTEM',
+    senderId: admin.id,
+    msgType: 'QUICK_ACTION',
+    content: approved
+      ? '【系统】客服已裁定同意售后，请按后续流程处理。'
+      : `【系统】客服已裁定拒绝售后。原因：${reason}`,
+    payload: { actionKey: key, approved, reason },
+  });
+
+  return { message, afterSale: arb.afterSale };
 }

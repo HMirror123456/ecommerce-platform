@@ -47,6 +47,10 @@ function logout() {
           <el-icon><Service /></el-icon>
           <span>售后仲裁</span>
         </el-menu-item>
+        <el-menu-item v-if="auth.isCsAgent" index="/chat">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>售后会话</span>
+        </el-menu-item>
         <el-menu-item index="/orders">
           <el-icon><List /></el-icon>
           <span>订单查询</span>

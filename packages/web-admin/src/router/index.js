@@ -42,6 +42,12 @@ const router = createRouter({
           meta: { requiresCsAgent: true, title: '售后仲裁' },
         },
         {
+          path: 'chat',
+          name: 'chat',
+          component: () => import('@/views/ChatListView.vue'),
+          meta: { requiresCsAgent: true, title: '售后会话' },
+        },
+        {
           path: 'orders',
           name: 'order-list',
           component: () => import('@/views/OrderListView.vue'),
