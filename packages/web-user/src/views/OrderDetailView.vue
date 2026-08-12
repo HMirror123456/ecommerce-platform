@@ -161,6 +161,28 @@ const paymentCountdown = computed(() => {
   };
 });
 
+const PROGRESS_STEPS = [
+  { key: 'PENDING_PAYMENT', label: '待支付' },
+  { key: 'PENDING_SHIPMENT', label: '待发货' },
+  { key: 'SHIPPED', label: '已发货' },
+  { key: 'COMPLETED', label: '已完成' },
+];
+
+/** 主流程进度（取消/退款不展示步进） */
+const progressState = computed(() => {
+  const s = order.value?.status;
+  if (!s) return { visible: false, active: -1 };
+  if (['CANCELLED', 'REFUNDED', 'REFUNDING'].includes(s)) {
+    return { visible: false, active: -1 };
+  }
+  const active = PROGRESS_STEPS.findIndex((p) => p.key === s);
+  return { visible: true, active: active < 0 ? 0 : active };
+});
+
+function thumbText(title) {
+  return String(title || '商').trim().slice(0, 1);
+}
+
 /** 顶部「下一步」指引（对齐订单/售后状态机） */
 const statusGuide = computed(() => {
   const o = order.value;
@@ -586,9 +608,27 @@ onUnmounted(() => {
 
     <template v-else-if="order">
       <div class="page-header">
-        <h2 class="page-title">订单详情</h2>
+        <div>
+          <h2 class="page-title">订单详情</h2>
+          <p class="page-sub">订单号 {{ order.orderNo }}</p>
+        </div>
         <el-button link type="primary" @click="router.push({ name: 'user-orders' })">返回列表</el-button>
       </div>
+
+      <ol v-if="progressState.visible" class="progress-track">
+        <li
+          v-for="(step, index) in PROGRESS_STEPS"
+          :key="step.key"
+          class="progress-step"
+          :class="{
+            done: index < progressState.active,
+            active: index === progressState.active,
+          }"
+        >
+          <span class="step-dot">{{ index < progressState.active ? '✓' : index + 1 }}</span>
+          <span class="step-label">{{ step.label }}</span>
+        </li>
+      </ol>
 
       <div v-if="statusGuide" class="status-guide" :class="`tone-${statusGuide.tone}`">
         <div class="guide-main">
@@ -614,6 +654,7 @@ onUnmounted(() => {
       </div>
 
       <el-card shadow="never" class="section-card">
+        <template #header><span class="card-title">订单概要</span></template>
         <el-descriptions :column="2" border>
           <el-descriptions-item label="订单号">{{ order.orderNo }}</el-descriptions-item>
           <el-descriptions-item label="订单状态">
@@ -644,8 +685,9 @@ onUnmounted(() => {
       </el-card>
 
       <el-card shadow="never" class="section-card">
-        <template #header><span>商品信息</span></template>
+        <template #header><span class="card-title">商品信息</span></template>
         <div v-for="item in order.items" :key="item.skuId" class="product-row">
+          <div class="product-thumb">{{ thumbText(item.title) }}</div>
           <span class="product-title">{{ item.title }}</span>
           <span class="product-qty">x{{ item.quantity }}</span>
           <span class="product-price">{{ formatPrice(item.price * item.quantity) }}</span>
@@ -653,19 +695,23 @@ onUnmounted(() => {
       </el-card>
 
       <el-card v-if="order.addressSnapshot" shadow="never" class="section-card">
-        <template #header><span>收货信息</span></template>
-        <p class="line">{{ order.addressSnapshot.receiverName }} {{ order.addressSnapshot.phone }}</p>
-        <p class="line">{{ order.addressSnapshot.fullAddress }}</p>
+        <template #header><span class="card-title">收货信息</span></template>
+        <div class="address-box">
+          <p class="line strong">{{ order.addressSnapshot.receiverName }} {{ order.addressSnapshot.phone }}</p>
+          <p class="line">{{ order.addressSnapshot.fullAddress }}</p>
+        </div>
       </el-card>
 
       <el-card v-if="order.subOrders?.length" shadow="never" class="section-card">
-        <template #header><span>履约信息</span></template>
+        <template #header><span class="card-title">履约信息</span></template>
         <div v-for="sub in order.subOrders" :key="sub.subOrderId" class="sub-block">
           <div class="sub-row">
-            <p class="line">
-              <strong>{{ sub.shopName }}</strong>
-              · {{ ORDER_STATUS_LABELS[sub.status] || sub.status }}
-            </p>
+            <div>
+              <p class="line strong">{{ sub.shopName }}</p>
+              <p class="line muted status-line">
+                {{ ORDER_STATUS_LABELS[sub.status] || sub.status }}
+              </p>
+            </div>
             <div class="sub-actions">
               <el-button
                 v-if="sub.status === 'SHIPPED'"
@@ -686,7 +732,7 @@ onUnmounted(() => {
               </el-button>
             </div>
           </div>
-          <p v-if="sub.shipment" class="line muted">
+          <p v-if="sub.shipment" class="line logistics">
             {{ sub.shipment.logisticsCompany }} {{ sub.shipment.trackingNo }}
             · 发货于 {{ formatTime(sub.shipment.shippedAt) }}
           </p>
@@ -699,7 +745,7 @@ onUnmounted(() => {
       <el-card shadow="never" class="section-card">
         <template #header>
           <div class="card-header">
-            <span>售后记录</span>
+            <span class="card-title">售后记录</span>
             <el-button v-if="canApplyAfterSale" type="primary" size="small" @click="openAfterSale">
               申请售后
             </el-button>
@@ -865,13 +911,106 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.order-detail-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding-bottom: 24px;
+}
+
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 16px;
+  gap: 12px;
 }
-.page-title { margin: 0; font-size: 20px; }
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.page-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.progress-track {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 18px 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.progress-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.progress-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 13px;
+  left: calc(50% + 16px);
+  width: calc(100% - 32px);
+  height: 2px;
+  background: #e8e8e8;
+}
+
+.progress-step.done:not(:last-child)::after,
+.progress-step.active:not(:last-child)::after {
+  background: #ffccc7;
+}
+
+.step-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: #f5f5f5;
+  border: 2px solid #e8e8e8;
+  z-index: 1;
+}
+
+.progress-step.done .step-dot {
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.progress-step.active .step-dot {
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 4px #fff1f0;
+}
+
+.step-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.progress-step.done .step-label,
+.progress-step.active .step-label {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
 .status-guide {
   display: flex;
   align-items: flex-start;
@@ -879,33 +1018,39 @@ onUnmounted(() => {
   gap: 16px;
   flex-wrap: wrap;
   margin-bottom: 16px;
-  padding: 16px 20px;
-  border-radius: 8px;
+  padding: 18px 20px;
+  border-radius: 10px;
   border: 1px solid var(--border-color);
   background: #fff;
 }
+
 .status-guide.tone-warning {
   border-color: #ffe58f;
   background: #fffbe6;
 }
+
 .status-guide.tone-danger {
   border-color: #ffccc7;
   background: #fff2f0;
 }
+
 .status-guide.tone-success {
   border-color: #b7eb8f;
   background: #f6ffed;
 }
+
 .status-guide.tone-info {
   border-color: #91d5ff;
   background: #e6f7ff;
 }
+
 .guide-title {
   margin: 8px 0 6px;
   font-size: 18px;
   font-weight: 700;
   color: var(--text-title);
 }
+
 .guide-desc {
   margin: 0;
   font-size: 14px;
@@ -913,85 +1058,243 @@ onUnmounted(() => {
   color: var(--text-body);
   max-width: 720px;
 }
+
 .guide-actions {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
   align-items: center;
 }
-.section-card { margin-bottom: 16px; }
+
+.section-card {
+  margin-bottom: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+}
+
+.card-title {
+  font-weight: 700;
+}
+
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  font-weight: 600;
 }
-.amount { font-size: 18px; font-weight: 700; color: var(--color-primary); }
+
+.amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
 .countdown-inline {
   margin-left: 8px;
   color: var(--color-primary);
   font-weight: 600;
 }
+
 .product-row {
-  display: flex;
-  gap: 16px;
-  padding: 8px 0;
+  display: grid;
+  grid-template-columns: 44px 1fr 48px 100px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border-color);
 }
-.product-row:last-child { border-bottom: none; }
-.product-title { flex: 1; }
-.product-qty { color: var(--text-muted); }
-.product-price { font-weight: 600; color: var(--color-primary); }
-.line { margin: 0 0 6px; }
-.muted { color: var(--text-muted); font-size: 13px; }
-.hint-text { color: #d48806; font-size: 12px; }
-.after-sale-policy { margin: 0 0 12px; }
-.dialog-hint { margin: 0 0 12px; line-height: 1.5; }
-.sub-block { padding: 8px 0; border-bottom: 1px solid var(--border-color); }
-.sub-block:last-child { border-bottom: none; }
-.sub-row {
+
+.product-row:last-child {
+  border-bottom: none;
+}
+
+.product-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: linear-gradient(135deg, #fff1f0, #ffe7e6);
+  border: 1px solid #ffccc7;
+}
+
+.product-title {
+  min-width: 0;
+}
+
+.product-qty {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.product-price {
+  font-weight: 700;
+  color: var(--color-primary);
+  text-align: right;
+}
+
+.address-box {
+  padding: 12px 14px;
+  background: #fafafa;
+  border-radius: 8px;
+}
+
+.line {
+  margin: 0 0 6px;
+}
+
+.line.strong {
+  font-weight: 700;
+  color: var(--text-title);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.hint-text {
+  color: #d48806;
+  font-size: 12px;
+}
+
+.after-sale-policy {
+  margin: 0 0 12px;
+}
+
+.dialog-hint {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.sub-block {
+  padding: 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.sub-block:last-child {
+  margin-bottom: 0;
+}
+
+.sub-row {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
-.sub-row .line { margin-bottom: 0; }
+
+.status-line {
+  margin-top: 2px;
+}
+
+.logistics {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px dashed var(--border-color);
+  font-size: 13px;
+  color: var(--text-body);
+}
+
 .sub-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
+
 .after-sale-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border-color);
+  padding: 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #fafafa;
 }
-.after-sale-row:last-child { border-bottom: none; }
-.as-type { margin-left: 8px; font-weight: 600; }
-.as-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+
+.after-sale-row:last-child {
+  margin-bottom: 0;
+}
+
+.as-type {
+  margin-left: 8px;
+  font-weight: 600;
+}
+
+.as-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
 .sku-check-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 100%;
 }
+
 .sku-check {
   margin-right: 0;
   height: auto;
   white-space: normal;
 }
-.sku-title { display: block; font-weight: 500; }
-.sku-meta { display: block; font-size: 12px; color: var(--text-muted); }
+
+.sku-title {
+  display: block;
+  font-weight: 500;
+}
+
+.sku-meta {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .actions {
+  position: sticky;
+  bottom: 12px;
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding: 8px 0 24px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+@media (max-width: 640px) {
+  .progress-track {
+    grid-template-columns: repeat(2, 1fr);
+    row-gap: 16px;
+  }
+
+  .progress-step:not(:last-child)::after {
+    display: none;
+  }
+
+  .product-row {
+    grid-template-columns: 44px 1fr;
+  }
+
+  .product-qty,
+  .product-price {
+    grid-column: 2;
+    text-align: left;
+  }
 }
 </style>

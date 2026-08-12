@@ -1,6 +1,6 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { confirmReceipt, fetchOrders } from '@/api/order';
 import { addCartItem } from '@/api/cart';
@@ -20,6 +20,17 @@ const STATUS_LABELS = Object.fromEntries(
   STATUS_OPTIONS.filter((o) => o.value).map((o) => [o.value, o.label]),
 );
 
+const STATUS_TONE = {
+  PENDING_PAYMENT: 'warning',
+  PENDING_SHIPMENT: 'info',
+  SHIPPED: 'primary',
+  COMPLETED: 'success',
+  REFUNDING: 'warning',
+  REFUNDED: 'muted',
+  CANCELLED: 'muted',
+};
+
+const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
 const orders = ref([]);
@@ -35,6 +46,11 @@ function formatPrice(value) {
 function formatTime(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN');
+}
+
+function thumbText(title) {
+  const t = String(title || '商').trim();
+  return t.slice(0, 1);
 }
 
 function paymentRemainText(order) {
@@ -63,6 +79,24 @@ async function loadOrders() {
     orders.value = [];
   } finally {
     loading.value = false;
+  }
+}
+
+function syncStatusFromRoute() {
+  const q = route.query.status;
+  const next = q == null ? '' : String(q);
+  const allowed = STATUS_OPTIONS.some((o) => o.value === next);
+  status.value = allowed ? next : '';
+}
+
+function onStatusChange(value) {
+  const query = { ...route.query };
+  if (value) query.status = value;
+  else delete query.status;
+  // 由 route.query.status 的 watch 统一拉取，避免重复请求
+  router.replace({ query });
+  if (String(route.query.status || '') === String(value || '')) {
+    loadOrders();
   }
 }
 
@@ -117,7 +151,16 @@ async function onBuyAgain(order) {
   }
 }
 
+watch(
+  () => route.query.status,
+  () => {
+    syncStatusFromRoute();
+    loadOrders();
+  },
+);
+
 onMounted(() => {
+  syncStatusFromRoute();
   loadOrders();
   tickTimer = setInterval(() => {
     nowMs.value = Date.now();
@@ -132,27 +175,45 @@ onUnmounted(() => {
 <template>
   <div class="order-list-page" v-loading="loading">
     <div class="page-header">
-      <h2 class="page-title">我的订单</h2>
-      <el-radio-group v-model="status" size="small" @change="loadOrders">
-        <el-radio-button v-for="opt in STATUS_OPTIONS" :key="opt.value || 'all'" :label="opt.value">
-          {{ opt.label }}
-        </el-radio-button>
-      </el-radio-group>
+      <div>
+        <h2 class="page-title">我的订单</h2>
+        <p class="page-sub">跟踪支付、发货与售后进度</p>
+      </div>
     </div>
 
-    <el-empty v-if="!loading && orders.length === 0" description="暂无订单">
+    <div class="filter-bar">
+      <button
+        v-for="opt in STATUS_OPTIONS"
+        :key="opt.value || 'all'"
+        type="button"
+        class="filter-chip"
+        :class="{ active: status === opt.value }"
+        @click="onStatusChange(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
+
+    <el-empty v-if="!loading && orders.length === 0" description="暂无相关订单">
       <el-button type="primary" @click="router.push({ name: 'products' })">去购物</el-button>
     </el-empty>
 
     <div v-else class="order-list">
-      <el-card v-for="order in orders" :key="order.orderId" shadow="never" class="order-card">
+      <article
+        v-for="order in orders"
+        :key="order.orderId"
+        class="order-card"
+        :class="`tone-${STATUS_TONE[order.status] || 'muted'}`"
+      >
         <div class="order-top">
-          <div>
+          <div class="order-meta">
             <span class="order-no">订单号 {{ order.orderNo }}</span>
             <span class="order-time">{{ formatTime(order.createdAt) }}</span>
           </div>
           <div class="status-wrap">
-            <el-tag size="small">{{ STATUS_LABELS[order.status] || order.status }}</el-tag>
+            <span class="status-pill" :class="STATUS_TONE[order.status] || 'muted'">
+              {{ STATUS_LABELS[order.status] || order.status }}
+            </span>
             <span
               v-if="order.status === 'PENDING_PAYMENT' && paymentRemainText(order)"
               class="pay-countdown"
@@ -164,7 +225,13 @@ onUnmounted(() => {
         </div>
 
         <div class="items">
-          <div v-for="item in order.items" :key="`${order.orderId}-${item.skuId}`" class="item-row">
+          <div
+            v-for="item in order.items"
+            :key="`${order.orderId}-${item.skuId}`"
+            class="item-row"
+            @click="goDetail(order.orderId)"
+          >
+            <div class="item-thumb">{{ thumbText(item.title) }}</div>
             <span class="item-title">{{ item.title }}</span>
             <span class="item-qty">x{{ item.quantity }}</span>
             <span class="item-price">{{ formatPrice(item.price * item.quantity) }}</span>
@@ -172,7 +239,10 @@ onUnmounted(() => {
         </div>
 
         <div class="order-footer">
-          <div class="total">合计：<span>{{ formatPrice(order.totalAmount) }}</span></div>
+          <div class="total">
+            合计
+            <span>{{ formatPrice(order.totalAmount) }}</span>
+          </div>
           <div class="actions">
             <el-button
               v-if="order.status === 'PENDING_PAYMENT' && !isPaymentExpired(order)"
@@ -206,65 +276,220 @@ onUnmounted(() => {
             <el-button @click="goDetail(order.orderId)">查看详情</el-button>
           </div>
         </div>
-      </el-card>
+      </article>
     </div>
   </div>
 </template>
 
 <style scoped>
 .page-header {
+  margin-bottom: 12px;
+}
+
+.page-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.page-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.filter-bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   margin-bottom: 16px;
 }
-.page-title { margin: 0; font-size: 20px; }
-.order-list { display: flex; flex-direction: column; gap: 12px; }
-.order-card { border: 1px solid var(--border-color); }
+
+.filter-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: #fafafa;
+  color: var(--text-body);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-chip:hover {
+  border-color: #ffb4b4;
+  color: var(--color-primary);
+}
+
+.filter-chip.active {
+  background: #fff1f0;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.order-card {
+  position: relative;
+  padding: 16px 16px 16px 20px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.order-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #d9d9d9;
+}
+
+.order-card.tone-warning::before { background: #faad14; }
+.order-card.tone-info::before { background: #1890ff; }
+.order-card.tone-primary::before { background: var(--color-primary); }
+.order-card.tone-success::before { background: #52c41a; }
+.order-card.tone-muted::before { background: #bfbfbf; }
+
 .order-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
-.order-no { font-weight: 600; margin-right: 12px; }
-.order-time { color: var(--text-muted); font-size: 13px; }
+
+.order-no {
+  font-weight: 700;
+  margin-right: 12px;
+}
+
+.order-time {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .status-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #f5f5f5;
+  color: var(--text-body);
+}
+
+.status-pill.warning { background: #fff7e6; color: #d48806; }
+.status-pill.info { background: #e6f7ff; color: #096dd9; }
+.status-pill.primary { background: #fff1f0; color: var(--color-primary); }
+.status-pill.success { background: #f6ffed; color: #389e0d; }
+.status-pill.muted { background: #f5f5f5; color: var(--text-muted); }
+
 .pay-countdown {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-primary);
 }
+
 .pay-countdown.expired {
   color: var(--color-error, #f56c6c);
 }
+
 .item-row {
   display: grid;
-  grid-template-columns: 1fr 60px 100px;
+  grid-template-columns: 44px 1fr 48px 96px;
   gap: 12px;
-  padding: 8px 0;
+  align-items: center;
+  padding: 10px 0;
   border-top: 1px solid var(--border-color);
+  cursor: pointer;
 }
-.item-title { color: var(--text-body); }
-.item-qty { color: var(--text-muted); text-align: right; }
-.item-price { text-align: right; font-weight: 600; color: var(--color-primary); }
+
+.item-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: linear-gradient(135deg, #fff1f0, #ffe7e6);
+  border: 1px solid #ffccc7;
+}
+
+.item-title {
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-qty {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.item-price {
+  text-align: right;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
 .order-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 12px;
+  margin-top: 4px;
   padding-top: 12px;
   border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
 }
-.total span { font-size: 18px; font-weight: 700; color: var(--color-primary); }
-.actions { display: flex; gap: 8px; }
+
+.total {
+  color: var(--text-body);
+  font-size: 13px;
+}
+
+.total span {
+  margin-left: 6px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-primary);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .item-row {
+    grid-template-columns: 44px 1fr;
+  }
+
+  .item-qty,
+  .item-price {
+    grid-column: 2;
+    text-align: left;
+  }
+}
 </style>
