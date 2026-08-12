@@ -137,11 +137,21 @@ onMounted(async () => {
 
 <template>
   <div class="product-list-page">
+    <div v-if="!searchKeyword" class="home-banner">
+      <div class="banner-copy">
+        <p class="banner-kicker">类京东 B2C 演示</p>
+        <h1 class="banner-title">发现好物，一站购齐</h1>
+        <p class="banner-desc">按分类逛店 · 多商家合单 · Mock 支付 · 售后可追溯</p>
+      </div>
+    </div>
+
     <div class="page-header">
       <div class="header-top">
         <div>
           <h1 class="page-title">{{ pageTitle }}</h1>
-          <p class="page-subtitle">按分类浏览，或输入关键词搜索商品</p>
+          <p class="page-subtitle">
+            {{ searchKeyword ? '根据关键词筛选上架商品' : '左侧选分类，顶栏可随时搜索' }}
+          </p>
         </div>
         <ProductSearchBar v-model="searchKeyword" @search="onSearch" />
       </div>
@@ -241,6 +251,38 @@ onMounted(async () => {
 <style scoped>
 .product-list-page {
   padding-bottom: 32px;
+}
+
+.home-banner {
+  margin-bottom: 20px;
+  padding: 28px 32px;
+  border-radius: 8px;
+  border: 1px solid #ffccc7;
+  background:
+    linear-gradient(120deg, rgba(228, 57, 60, 0.08), rgba(255, 255, 255, 0.95) 55%),
+    #fff;
+}
+
+.banner-kicker {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.banner-title {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-title);
+  line-height: 1.25;
+}
+
+.banner-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
 }
 
 .page-header {

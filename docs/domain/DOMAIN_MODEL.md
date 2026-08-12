@@ -173,7 +173,7 @@ stateDiagram-v2
 
 **自动确认收货：**
 - 粒度：每个 `SHIPPED` 子单独立计时（`shipment.shippedAt` + 阈值）
-- 超时阈值：演示环境 **10 分钟**（对标业务常见约 7 天；常量 `ORDER_AUTO_CONFIRM_MS`）
+- 超时阈值：**7 天**（常量 `ORDER_AUTO_CONFIRM_MS`）
 - 到期后该子单 → `COMPLETED`，再按上列规则聚合主单状态
 - 访问订单相关接口时扫描过期（与待支付 15min 超时同一机制）
 - 整单确认接口仅当全部活跃子单均为 `SHIPPED` 时可用（等价于一次性确认所有店铺）

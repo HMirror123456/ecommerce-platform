@@ -1,13 +1,43 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import ProductSearchBar from '@/components/ProductSearchBar.vue';
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
 const pageTitle = computed(() => route.meta.title || '');
+const headerKeyword = ref('');
+
+const showHeaderSearch = computed(() => {
+  // 登录后主布局内常驻；登录/注册页不在此布局
+  return true;
+});
+
+watch(
+  () => [route.name, route.query.keyword, route.query.q],
+  () => {
+    if (route.name === 'products') {
+      const raw = route.query.keyword ?? route.query.q;
+      headerKeyword.value = raw == null ? '' : String(raw).trim();
+    }
+  },
+  { immediate: true },
+);
+
+function onHeaderSearch(keyword) {
+  const next = String(keyword || '').trim();
+  headerKeyword.value = next;
+  const query = {};
+  if (next) query.keyword = next;
+  // 保留分类筛选（若当前在商品页）
+  if (route.name === 'products' && route.query.categoryId) {
+    query.categoryId = route.query.categoryId;
+  }
+  router.push({ name: 'products', query });
+}
 
 function onLogout() {
   auth.logout();
@@ -20,6 +50,13 @@ function onLogout() {
     <el-header class="header">
       <div class="header-inner">
         <router-link to="/products" class="logo">电商平台</router-link>
+        <div v-if="showHeaderSearch" class="header-search">
+          <ProductSearchBar
+            v-model="headerKeyword"
+            placeholder="搜索商品名称"
+            @search="onHeaderSearch"
+          />
+        </div>
         <div class="header-right">
           <router-link to="/products" class="nav-link">首页</router-link>
           <router-link to="/cart" class="nav-link">购物车</router-link>
@@ -62,7 +99,7 @@ function onLogout() {
   padding: 0 24px;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 20px;
 }
 .logo {
   flex-shrink: 0;
@@ -70,6 +107,14 @@ function onLogout() {
   font-weight: 700;
   color: var(--color-primary);
   text-decoration: none;
+}
+.header-search {
+  flex: 1;
+  min-width: 0;
+  max-width: 480px;
+}
+.header-search :deep(.product-search-bar) {
+  max-width: none;
 }
 .header-right {
   margin-left: auto;
@@ -114,5 +159,27 @@ function onLogout() {
   font-size: 13px;
   color: var(--text-muted);
   text-align: left;
+}
+
+@media (max-width: 768px) {
+  .header {
+    height: auto;
+    min-height: 64px;
+  }
+  .header-inner {
+    height: auto;
+    min-height: 64px;
+    padding: 10px 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .header-search {
+    order: 3;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .header-right {
+    margin-left: 0;
+  }
 }
 </style>

@@ -14,8 +14,8 @@ import * as stockRepo from '../repositories/stockRepo.js';
 import * as chatRepo from '../repositories/chatRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
-/** 演示：全部子单发货后 10 分钟自动确认收货（对标业务约 7 天） */
-const ORDER_AUTO_CONFIRM_MS = 10 * 60 * 1000;
+/** 子单发货后 7 天自动确认收货 */
+const ORDER_AUTO_CONFIRM_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Legacy product fixtures; main category/product/stock flows use repository-backed MySQL data.
 export const categories = [
@@ -764,9 +764,23 @@ export async function setDefaultAddress(userId, addressId) {
 
 async function buildCartSkuSnapshot(skuId) {
   const snapshot = await productRepo.findSkuSnapshot(skuId);
-  if (!snapshot || snapshot.status !== 'ON_SHELF') return null;
+  if (!snapshot) return null;
+  if (snapshot.status !== 'ON_SHELF') {
+    return {
+      skuId: snapshot.skuId,
+      spuId: snapshot.spuId,
+      specJson: snapshot.specJson || {},
+      price: 0,
+      stock: 0,
+      title: '商品已下架',
+      mainImage: snapshot.mainImage || '',
+      shopName: snapshot.shopName || '',
+      invalid: true,
+    };
+  }
   return {
     skuId: snapshot.skuId,
+    spuId: snapshot.spuId,
     specJson: snapshot.specJson,
     price: snapshot.price,
     stock: snapshot.stock.available,
@@ -784,12 +798,14 @@ async function serializeCartItem(item) {
     quantity: item.quantity,
     sku: sku || {
       skuId: item.skuId,
+      spuId: null,
       specJson: {},
       price: 0,
       stock: 0,
       title: '商品已下架',
       mainImage: '',
       shopName: '',
+      invalid: true,
     },
   };
 }
@@ -947,7 +963,12 @@ function serializeFavoriteItem(favorite, spu) {
 
 export async function getFavorites(userId) {
   const list = await favoriteRepo.listByUser(userId);
-  return list.map((item) => serializeFavoriteItem(item, getSpuById(item.spuId)));
+  const result = [];
+  for (const item of list) {
+    const spu = await productRepo.findById(item.spuId);
+    result.push(serializeFavoriteItem(item, spu));
+  }
+  return result;
 }
 
 export async function isFavorite(userId, spuId) {
@@ -961,13 +982,13 @@ export async function addFavorite(userId, spuId) {
   if (!Number.isInteger(id) || id <= 0) {
     return { error: 'INVALID_INPUT', message: 'spuId 无效' };
   }
-  const spu = getSpuById(id);
+  const spu = await productRepo.findById(id);
   if (!spu || spu.status !== 'ON_SHELF') {
     return { error: 'PRODUCT_NOT_ON_SHELF', message: '商品不存在或未上架' };
   }
   const existing = await favoriteRepo.findByUserAndSpu(userId, id);
   if (existing) {
-    return { error: 'ALREADY_EXISTS', message: '已收藏该商品' };
+    return { error: 'ALREADY_EXISTS', message: '已收藏该商品', favorite: serializeFavoriteItem(existing, spu) };
   }
   const created = await favoriteRepo.create(userId, id);
   return { favorite: serializeFavoriteItem(created, spu) };

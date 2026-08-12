@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -11,6 +11,7 @@ import {
   fetchOrder,
   submitAfterSaleReturn,
 } from '@/api/order';
+import { addCartItem } from '@/api/cart';
 import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
 
 const ORDER_STATUS_LABELS = {
@@ -43,6 +44,7 @@ const orderId = computed(() => Number(route.params.orderId));
 
 const loading = ref(false);
 const submitting = ref(false);
+const rebuying = ref(false);
 const order = ref(null);
 const dialogVisible = ref(false);
 const form = ref({
@@ -68,6 +70,10 @@ const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
 const merchantChatTarget = ref(null);
 
+/** 驱动支付倒计时刷新 */
+const nowMs = ref(Date.now());
+let tickTimer = null;
+
 const OCCUPIED_AFTER_SALE = new Set(['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING', 'REFUNDED']);
 
 const occupiedQtyBySku = computed(() => {
@@ -87,7 +93,6 @@ const shippableSubOrders = computed(() =>
   (order.value?.subOrders || []).filter((s) => ['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(s.status)),
 );
 
-/** 各子单剩余可售后商品（整件） */
 const remainingBySubOrderId = computed(() => {
   const result = new Map();
   for (const sub of shippableSubOrders.value) {
@@ -124,7 +129,6 @@ const canApplyAfterSale = computed(() => {
   return false;
 });
 
-/** 全部活跃子单均已发货时可整单确认 */
 const canConfirmAllReceipt = computed(() => {
   const subs = (order.value?.subOrders || []).filter((s) => s.status !== 'CANCELLED');
   return (
@@ -137,6 +141,141 @@ const canConfirmAllReceipt = computed(() => {
 const hasShippedSubToConfirm = computed(() =>
   (order.value?.subOrders || []).some((s) => s.status === 'SHIPPED'),
 );
+
+const hasPendingShipmentSub = computed(() =>
+  (order.value?.subOrders || []).some((s) => s.status === 'PENDING_SHIPMENT' || s.status === 'PAID'),
+);
+
+const paymentCountdown = computed(() => {
+  void nowMs.value;
+  if (order.value?.status !== 'PENDING_PAYMENT' || !order.value?.paymentDeadline) {
+    return { text: '', expired: false };
+  }
+  const remaining = new Date(order.value.paymentDeadline).getTime() - Date.now();
+  if (remaining <= 0) return { text: '支付已超时，订单将自动取消', expired: true };
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  return {
+    text: `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`,
+    expired: false,
+  };
+});
+
+/** 顶部「下一步」指引（对齐订单/售后状态机） */
+const statusGuide = computed(() => {
+  const o = order.value;
+  if (!o) return null;
+  const status = o.status;
+  const label = ORDER_STATUS_LABELS[status] || status;
+
+  if (status === 'PENDING_PAYMENT') {
+    return {
+      label,
+      tone: paymentCountdown.value.expired ? 'danger' : 'warning',
+      title: paymentCountdown.value.expired ? '支付已超时' : '等待支付',
+      desc: paymentCountdown.value.expired
+        ? '超时未支付将自动取消并释放库存，请返回列表刷新状态。'
+        : `请在 ${formatTime(o.paymentDeadline)} 前完成支付（剩余 ${paymentCountdown.value.text}），超时自动取消。`,
+      primary: paymentCountdown.value.expired ? null : { text: '去支付', action: 'pay' },
+      secondary: paymentCountdown.value.expired ? null : { text: '取消订单', action: 'cancel' },
+    };
+  }
+  if (status === 'PENDING_SHIPMENT') {
+    return {
+      label,
+      tone: 'info',
+      title: '等待商家发货',
+      desc: '支付成功，商家备货中。发货后可在「履约信息」查看物流并确认收货。',
+      primary: null,
+      secondary: null,
+    };
+  }
+  if (status === 'SHIPPED') {
+    if (hasPendingShipmentSub.value && hasShippedSubToConfirm.value) {
+      return {
+        label: '部分发货',
+        tone: 'warning',
+        title: '部分商品已发货',
+        desc: '请对已发货店铺分别确认收货；未发货店铺请继续等待。整单完成需全部店铺确认或自动确认。',
+        primary: null,
+        secondary: canApplyAfterSale.value ? { text: '申请售后', action: 'afterSale' } : null,
+      };
+    }
+    if (canConfirmAllReceipt.value) {
+      return {
+        label,
+        tone: 'success',
+        title: '商品已全部发货',
+        desc: '收货无误后可确认全部收货；也可按店铺分别确认，或等待约 7 天自动确认。',
+        primary: { text: '确认全部收货', action: 'confirmAll' },
+        secondary: canApplyAfterSale.value ? { text: '申请售后', action: 'afterSale' } : null,
+      };
+    }
+    return {
+      label,
+      tone: 'success',
+      title: '配送中',
+      desc: hasShippedSubToConfirm.value
+        ? '请在「履约信息」对已发货店铺确认收货。'
+        : '订单配送中，请留意物流信息。',
+      primary: null,
+      secondary: canApplyAfterSale.value ? { text: '申请售后', action: 'afterSale' } : null,
+    };
+  }
+  if (status === 'COMPLETED') {
+    return {
+      label,
+      tone: 'success',
+      title: '订单已完成',
+      desc: canApplyAfterSale.value
+        ? '如需退款/退货，可对剩余可售后商品申请售后（仅退款或退货退款）。'
+        : '本单商品已全部完成售后或无可申请售后商品。',
+      primary: canApplyAfterSale.value ? { text: '申请售后', action: 'afterSale' } : null,
+      secondary: null,
+    };
+  }
+  if (status === 'REFUNDING') {
+    return {
+      label,
+      tone: 'warning',
+      title: '售后处理中',
+      desc: '请查看下方售后记录。商家 48 小时内未处理或已拒绝时，可申请平台介入。',
+      primary: canApplyAfterSale.value ? { text: '继续申请售后', action: 'afterSale' } : null,
+      secondary: null,
+    };
+  }
+  if (status === 'REFUNDED') {
+    return {
+      label,
+      tone: 'info',
+      title: '已退款',
+      desc: '售后退款已完成。',
+      primary: null,
+      secondary: null,
+    };
+  }
+  if (status === 'CANCELLED') {
+    return {
+      label,
+      tone: 'info',
+      title: '订单已取消',
+      desc: '该订单已取消，库存已释放（如曾锁定）。',
+      primary: null,
+      secondary: null,
+    };
+  }
+  return { label, tone: 'info', title: label, desc: '', primary: null, secondary: null };
+});
+
+const afterSaleEmptyHint = computed(() => {
+  if (canApplyAfterSale.value) {
+    return '暂无售后记录。已发货/已完成后可申请仅退款或退货退款（按商品整件）。';
+  }
+  if (['PENDING_PAYMENT', 'PENDING_SHIPMENT', 'CANCELLED'].includes(order.value?.status)) {
+    return '订单需发货或完成后才可申请售后。';
+  }
+  return '暂无售后记录，且当前没有可申请售后的商品。';
+});
 
 function formatPrice(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
@@ -151,6 +290,33 @@ function formatAfterSaleItems(as) {
   const list = as?.items || [];
   if (!list.length) return '全部商品';
   return list.map((it) => `${it.title || `SKU${it.skuId}`}×${it.quantity}`).join('、');
+}
+
+function escalateButtonLabel(afterSale) {
+  if (afterSale.status === 'REJECTED') return '商家已拒绝，申请平台介入';
+  return '申请平台介入';
+}
+
+function escalateHint(afterSale) {
+  if (afterSale.status === 'REJECTED') {
+    return '商家已拒绝本次售后，可升级由平台客服仲裁。';
+  }
+  if (afterSale.status === 'APPLIED') {
+    return '商家需在 48 小时内处理；超时或协商不成可申请平台介入。';
+  }
+  return '';
+}
+
+function onGuideAction(action) {
+  if (action === 'pay') {
+    router.push({ name: 'payment', params: { orderId: order.value.orderId } });
+  } else if (action === 'cancel') {
+    onCancel();
+  } else if (action === 'confirmAll') {
+    onConfirmReceipt();
+  } else if (action === 'afterSale') {
+    openAfterSale();
+  }
 }
 
 async function loadOrder() {
@@ -178,7 +344,6 @@ async function onCancel() {
   }
 }
 
-/** 整单确认：全部子单均为 SHIPPED */
 async function onConfirmReceipt() {
   try {
     await ElMessageBox.confirm('确认已收到全部店铺商品？确认后订单将完成。', '确认收货', {
@@ -192,7 +357,6 @@ async function onConfirmReceipt() {
   }
 }
 
-/** 领域：子单 SHIPPED → COMPLETED */
 async function onConfirmSubReceipt(sub) {
   try {
     await ElMessageBox.confirm(
@@ -206,6 +370,39 @@ async function onConfirmSubReceipt(sub) {
     await loadOrder();
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message || '确认收货失败');
+  }
+}
+
+/** 再买一单：按订单快照 SKU 重新加购 */
+async function onBuyAgain() {
+  const lines = (order.value?.items || []).filter((it) => Number(it.skuId) > 0);
+  if (!lines.length) {
+    ElMessage.warning('订单没有可加购的商品');
+    return;
+  }
+  rebuying.value = true;
+  let ok = 0;
+  let fail = 0;
+  try {
+    for (const line of lines) {
+      try {
+        await addCartItem(Number(line.skuId), Math.max(1, Number(line.quantity) || 1));
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    if (ok > 0 && fail === 0) {
+      ElMessage.success(`已将 ${ok} 种商品加入购物车`);
+      router.push({ name: 'cart' });
+    } else if (ok > 0) {
+      ElMessage.warning(`成功 ${ok} 种，失败 ${fail} 种（可能已下架或库存不足）`);
+      router.push({ name: 'cart' });
+    } else {
+      ElMessage.error('加购失败，商品可能已下架或库存不足');
+    }
+  } finally {
+    rebuying.value = false;
   }
 }
 
@@ -255,7 +452,7 @@ async function onSubmitAfterSale() {
       subOrderId: form.value.subOrderId || undefined,
       items,
     });
-    ElMessage.success('售后申请已提交');
+    ElMessage.success('售后申请已提交，请等待商家在 48 小时内处理');
     dialogVisible.value = false;
     await loadOrder();
   } catch (e) {
@@ -267,9 +464,13 @@ async function onSubmitAfterSale() {
 
 async function onEscalate(afterSale) {
   try {
-    await ElMessageBox.confirm('确认申请平台介入？商家拒绝或超时后可升级为平台仲裁。', '申请平台介入', {
-      type: 'warning',
-    });
+    await ElMessageBox.confirm(
+      afterSale.status === 'REJECTED'
+        ? '商家已拒绝售后，确认申请平台介入并由客服仲裁？'
+        : '确认申请平台介入？适用于商家超时未处理或协商不成的情况。',
+      '申请平台介入',
+      { type: 'warning' },
+    );
     await escalateAfterSale(orderId.value, afterSale.afterSaleId);
     ElMessage.success('已申请平台介入');
     await loadOrder();
@@ -283,17 +484,14 @@ function canEscalate(afterSale) {
   return afterSale.status === 'APPLIED' || afterSale.status === 'REJECTED';
 }
 
-/** 领域规则：平台客服会话挂在售后升级后（USER_CS）；仅仲裁中展示入口 */
 function canContactCs(afterSale) {
   return afterSale?.status === 'ESCALATED';
 }
 
-/** 领域规则：USER_MERCHANT 售后协商，售后待商家处理时可聊 */
 function canContactMerchant(afterSale) {
   return afterSale?.status === 'APPLIED';
 }
 
-/** 履约前/履约中：按子单联系店铺（未发货改色等） */
 function canContactShop(sub) {
   if (!order.value || !sub) return false;
   if (['CANCELLED', 'REFUNDED'].includes(order.value.status)) return false;
@@ -368,7 +566,16 @@ async function onSubmitReturn() {
   }
 }
 
-onMounted(loadOrder);
+onMounted(() => {
+  loadOrder();
+  tickTimer = setInterval(() => {
+    nowMs.value = Date.now();
+  }, 1000);
+});
+
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer);
+});
 </script>
 
 <template>
@@ -383,6 +590,29 @@ onMounted(loadOrder);
         <el-button link type="primary" @click="router.push({ name: 'user-orders' })">返回列表</el-button>
       </div>
 
+      <div v-if="statusGuide" class="status-guide" :class="`tone-${statusGuide.tone}`">
+        <div class="guide-main">
+          <el-tag size="small" effect="dark">{{ statusGuide.label }}</el-tag>
+          <h3 class="guide-title">{{ statusGuide.title }}</h3>
+          <p class="guide-desc">{{ statusGuide.desc }}</p>
+        </div>
+        <div v-if="statusGuide.primary || statusGuide.secondary" class="guide-actions">
+          <el-button
+            v-if="statusGuide.secondary"
+            @click="onGuideAction(statusGuide.secondary.action)"
+          >
+            {{ statusGuide.secondary.text }}
+          </el-button>
+          <el-button
+            v-if="statusGuide.primary"
+            type="primary"
+            @click="onGuideAction(statusGuide.primary.action)"
+          >
+            {{ statusGuide.primary.text }}
+          </el-button>
+        </div>
+      </div>
+
       <el-card shadow="never" class="section-card">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="订单号">{{ order.orderNo }}</el-descriptions-item>
@@ -394,11 +624,21 @@ onMounted(loadOrder);
             <span class="amount">{{ formatPrice(order.totalAmount) }}</span>
           </el-descriptions-item>
           <el-descriptions-item
+            v-if="order.status === 'PENDING_PAYMENT' && order.paymentDeadline"
+            label="支付截止"
+            :span="2"
+          >
+            {{ formatTime(order.paymentDeadline) }}
+            <span v-if="paymentCountdown.text" class="countdown-inline">
+              · {{ paymentCountdown.expired ? paymentCountdown.text : `剩余 ${paymentCountdown.text}` }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item
             v-if="hasShippedSubToConfirm && order.autoConfirmDeadline"
             label="自动确认"
             :span="2"
           >
-            最早将于 {{ formatTime(order.autoConfirmDeadline) }} 自动确认已发货包裹（各店铺发货后约 10 分钟）
+            最早将于 {{ formatTime(order.autoConfirmDeadline) }} 自动确认已发货包裹（各店铺发货后约 7 天）
           </el-descriptions-item>
         </el-descriptions>
       </el-card>
@@ -465,9 +705,12 @@ onMounted(loadOrder);
             </el-button>
           </div>
         </template>
+        <p class="after-sale-policy muted">
+          已发货/已完成后可申请；商家 48 小时内处理，超时或拒绝后可申请平台介入。
+        </p>
         <el-empty
           v-if="!order.afterSales?.length"
-          description="暂无售后"
+          :description="afterSaleEmptyHint"
           :image-size="64"
         />
         <div v-for="as in order.afterSales || []" :key="as.afterSaleId" class="after-sale-row">
@@ -479,14 +722,12 @@ onMounted(loadOrder);
             <p class="line muted">原因：{{ as.reason }}</p>
             <p class="line muted">商品：{{ formatAfterSaleItems(as) }}</p>
             <p v-if="as.auditReason" class="line muted">处理说明：{{ as.auditReason }}</p>
-            <p
-              v-if="as.returnShipment"
-              class="line muted"
-            >
+            <p v-if="as.returnShipment" class="line muted">
               寄回物流：{{ as.returnShipment.logisticsCompany }} {{ as.returnShipment.trackingNo }}
               · {{ formatTime(as.returnShipment.shippedAt) }}
             </p>
             <p class="line muted">申请时间：{{ formatTime(as.appliedAt) }}</p>
+            <p v-if="escalateHint(as)" class="line hint-text">{{ escalateHint(as) }}</p>
           </div>
           <div class="as-actions">
             <el-button
@@ -495,7 +736,7 @@ onMounted(loadOrder);
               size="small"
               @click="openMerchantChatDrawer(as)"
             >
-              联系商家
+              联系商家协商
             </el-button>
             <el-button
               v-if="canEscalate(as)"
@@ -504,7 +745,7 @@ onMounted(loadOrder);
               size="small"
               @click="onEscalate(as)"
             >
-              申请平台介入
+              {{ escalateButtonLabel(as) }}
             </el-button>
             <el-button
               v-if="canContactCs(as)"
@@ -528,30 +769,33 @@ onMounted(loadOrder);
       </el-card>
 
       <div class="actions">
-        <el-button
-          v-if="order.status === 'PENDING_PAYMENT'"
-          @click="onCancel"
-        >
+        <el-button v-if="order.status === 'PENDING_PAYMENT' && !paymentCountdown.expired" @click="onCancel">
           取消订单
         </el-button>
         <el-button
-          v-if="order.status === 'PENDING_PAYMENT'"
+          v-if="order.status === 'PENDING_PAYMENT' && !paymentCountdown.expired"
           type="primary"
           @click="router.push({ name: 'payment', params: { orderId: order.orderId } })"
         >
           去支付
         </el-button>
-        <el-button
-          v-if="canConfirmAllReceipt"
-          type="primary"
-          @click="onConfirmReceipt"
-        >
+        <el-button v-if="canConfirmAllReceipt" type="primary" @click="onConfirmReceipt">
           确认全部收货
+        </el-button>
+        <el-button
+          v-if="order.items?.length && order.status !== 'PENDING_PAYMENT'"
+          :loading="rebuying"
+          @click="onBuyAgain"
+        >
+          再买一单
         </el-button>
       </div>
     </template>
 
     <el-dialog v-model="dialogVisible" title="申请售后" width="520px">
+      <p class="dialog-hint muted">
+        仅已发货/已完成（或退款中仍有剩余）订单可申请；本迭代按 SKU 整件售后。商家 48 小时内处理。
+      </p>
       <el-form label-position="top">
         <el-form-item label="售后类型" required>
           <el-radio-group v-model="form.type">
@@ -628,6 +872,53 @@ onMounted(loadOrder);
   margin-bottom: 16px;
 }
 .page-title { margin: 0; font-size: 20px; }
+.status-guide {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 16px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: #fff;
+}
+.status-guide.tone-warning {
+  border-color: #ffe58f;
+  background: #fffbe6;
+}
+.status-guide.tone-danger {
+  border-color: #ffccc7;
+  background: #fff2f0;
+}
+.status-guide.tone-success {
+  border-color: #b7eb8f;
+  background: #f6ffed;
+}
+.status-guide.tone-info {
+  border-color: #91d5ff;
+  background: #e6f7ff;
+}
+.guide-title {
+  margin: 8px 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-title);
+}
+.guide-desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-body);
+  max-width: 720px;
+}
+.guide-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  align-items: center;
+}
 .section-card { margin-bottom: 16px; }
 .card-header {
   display: flex;
@@ -637,6 +928,11 @@ onMounted(loadOrder);
   font-weight: 600;
 }
 .amount { font-size: 18px; font-weight: 700; color: var(--color-primary); }
+.countdown-inline {
+  margin-left: 8px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
 .product-row {
   display: flex;
   gap: 16px;
@@ -649,6 +945,9 @@ onMounted(loadOrder);
 .product-price { font-weight: 600; color: var(--color-primary); }
 .line { margin: 0 0 6px; }
 .muted { color: var(--text-muted); font-size: 13px; }
+.hint-text { color: #d48806; font-size: 12px; }
+.after-sale-policy { margin: 0 0 12px; }
+.dialog-hint { margin: 0 0 12px; line-height: 1.5; }
 .sub-block { padding: 8px 0; border-bottom: 1px solid var(--border-color); }
 .sub-block:last-child { border-bottom: none; }
 .sub-row {

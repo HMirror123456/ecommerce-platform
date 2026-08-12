@@ -1,8 +1,9 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { confirmReceipt, fetchOrders } from '@/api/order';
+import { addCartItem } from '@/api/cart';
 
 const STATUS_OPTIONS = [
   { label: '全部', value: '' },
@@ -23,6 +24,9 @@ const router = useRouter();
 const loading = ref(false);
 const orders = ref([]);
 const status = ref('');
+const nowMs = ref(Date.now());
+const rebuyingId = ref(null);
+let tickTimer = null;
 
 function formatPrice(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
@@ -31,6 +35,22 @@ function formatPrice(value) {
 function formatTime(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN');
+}
+
+function paymentRemainText(order) {
+  void nowMs.value;
+  if (order.status !== 'PENDING_PAYMENT' || !order.paymentDeadline) return '';
+  const remaining = new Date(order.paymentDeadline).getTime() - Date.now();
+  if (remaining <= 0) return '已超时';
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  return `剩余 ${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function isPaymentExpired(order) {
+  void nowMs.value;
+  if (order.status !== 'PENDING_PAYMENT' || !order.paymentDeadline) return false;
+  return new Date(order.paymentDeadline).getTime() <= Date.now();
 }
 
 async function loadOrders() {
@@ -54,7 +74,6 @@ function goPay(orderId) {
   router.push({ name: 'payment', params: { orderId } });
 }
 
-/** 整单确认：仅全部子单已发货时（后端 canConfirmAllReceipt） */
 async function onConfirmReceipt(orderId) {
   try {
     await ElMessageBox.confirm('确认已收到全部商品？确认后订单将完成。', '确认收货', { type: 'info' });
@@ -66,7 +85,48 @@ async function onConfirmReceipt(orderId) {
   }
 }
 
-onMounted(loadOrders);
+async function onBuyAgain(order) {
+  const lines = (order.items || []).filter((it) => Number(it.skuId) > 0);
+  if (!lines.length) {
+    ElMessage.warning('订单没有可加购的商品');
+    return;
+  }
+  rebuyingId.value = order.orderId;
+  let ok = 0;
+  let fail = 0;
+  try {
+    for (const line of lines) {
+      try {
+        await addCartItem(Number(line.skuId), Math.max(1, Number(line.quantity) || 1));
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    if (ok > 0 && fail === 0) {
+      ElMessage.success(`已将 ${ok} 种商品加入购物车`);
+      router.push({ name: 'cart' });
+    } else if (ok > 0) {
+      ElMessage.warning(`成功 ${ok} 种，失败 ${fail} 种（可能已下架或库存不足）`);
+      router.push({ name: 'cart' });
+    } else {
+      ElMessage.error('加购失败，商品可能已下架或库存不足');
+    }
+  } finally {
+    rebuyingId.value = null;
+  }
+}
+
+onMounted(() => {
+  loadOrders();
+  tickTimer = setInterval(() => {
+    nowMs.value = Date.now();
+  }, 1000);
+});
+
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer);
+});
 </script>
 
 <template>
@@ -91,7 +151,16 @@ onMounted(loadOrders);
             <span class="order-no">订单号 {{ order.orderNo }}</span>
             <span class="order-time">{{ formatTime(order.createdAt) }}</span>
           </div>
-          <el-tag size="small">{{ STATUS_LABELS[order.status] || order.status }}</el-tag>
+          <div class="status-wrap">
+            <el-tag size="small">{{ STATUS_LABELS[order.status] || order.status }}</el-tag>
+            <span
+              v-if="order.status === 'PENDING_PAYMENT' && paymentRemainText(order)"
+              class="pay-countdown"
+              :class="{ expired: isPaymentExpired(order) }"
+            >
+              {{ paymentRemainText(order) }}
+            </span>
+          </div>
         </div>
 
         <div class="items">
@@ -106,7 +175,7 @@ onMounted(loadOrders);
           <div class="total">合计：<span>{{ formatPrice(order.totalAmount) }}</span></div>
           <div class="actions">
             <el-button
-              v-if="order.status === 'PENDING_PAYMENT'"
+              v-if="order.status === 'PENDING_PAYMENT' && !isPaymentExpired(order)"
               type="primary"
               @click="goPay(order.orderId)"
             >
@@ -126,6 +195,13 @@ onMounted(loadOrders);
               @click="goDetail(order.orderId)"
             >
               去确认收货
+            </el-button>
+            <el-button
+              v-if="order.items?.length && order.status !== 'PENDING_PAYMENT'"
+              :loading="rebuyingId === order.orderId"
+              @click="onBuyAgain(order)"
+            >
+              再买一单
             </el-button>
             <el-button @click="goDetail(order.orderId)">查看详情</el-button>
           </div>
@@ -156,6 +232,20 @@ onMounted(loadOrders);
 }
 .order-no { font-weight: 600; margin-right: 12px; }
 .order-time { color: var(--text-muted); font-size: 13px; }
+.status-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pay-countdown {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+.pay-countdown.expired {
+  color: var(--color-error, #f56c6c);
+}
 .item-row {
   display: grid;
   grid-template-columns: 1fr 60px 100px;

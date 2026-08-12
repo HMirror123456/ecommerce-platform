@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import ProductSearchBar from '@/components/ProductSearchBar.vue';
 import { deleteCartItem, fetchCartItems, updateCartItem } from '@/api/cart';
+import { addFavorite } from '@/api/favorite';
 
 const router = useRouter();
 const loading = ref(false);
@@ -11,6 +12,7 @@ const items = ref([]);
 const updatingId = ref(null);
 const searchKeyword = ref('');
 const appliedKeyword = ref('');
+const movingFavorite = ref(false);
 /** 勾选的购物车行 itemId（仅有效商品参与结算） */
 const selectedIds = ref([]);
 
@@ -25,7 +27,7 @@ const filteredItems = computed(() => {
 });
 
 function isInvalid(row) {
-  return !row.sku?.title || row.sku.title === '商品已下架';
+  return !row.sku?.title || row.sku.title === '商品已下架' || row.sku?.invalid;
 }
 
 const validItems = computed(() => filteredItems.value.filter((item) => !isInvalid(item)));
@@ -142,6 +144,96 @@ async function onRemove(row) {
     await loadCart();
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message || '删除失败');
+  }
+}
+
+async function onClearInvalid() {
+  const invalidRows = items.value.filter((item) => isInvalid(item));
+  if (!invalidRows.length) {
+    ElMessage.info('没有失效商品');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认清除 ${invalidRows.length} 件失效商品？`,
+      '清除失效商品',
+      { type: 'warning' },
+    );
+    for (const row of invalidRows) {
+      await deleteCartItem(row.itemId);
+    }
+    selectedIds.value = selectedIds.value.filter(
+      (id) => !invalidRows.some((row) => row.itemId === id),
+    );
+    ElMessage.success('已清除失效商品');
+    await loadCart();
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '清除失败');
+  }
+}
+
+/** 勾选商品移入收藏：收藏 SPU 后从购物车移除 */
+async function onMoveToFavorites() {
+  const rows = selectedValidItems.value.filter((row) => Number(row.sku?.spuId) > 0);
+  if (!rows.length) {
+    ElMessage.warning('请先勾选有效商品');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将已选 ${rows.length} 件商品移入收藏夹，并从购物车移除？`,
+      '移入收藏夹',
+      { type: 'info' },
+    );
+  } catch (e) {
+    if (e === 'cancel') return;
+  }
+
+  movingFavorite.value = true;
+  const okSpuIds = new Set();
+  let favorited = 0;
+  let already = 0;
+  let fail = 0;
+  try {
+    const spuIds = [...new Set(rows.map((row) => Number(row.sku.spuId)))];
+    for (const spuId of spuIds) {
+      try {
+        await addFavorite(spuId);
+        okSpuIds.add(spuId);
+        favorited += 1;
+      } catch (e) {
+        const msg = String(e.message || '');
+        if (msg.includes('已收藏')) {
+          okSpuIds.add(spuId);
+          already += 1;
+        } else {
+          fail += 1;
+        }
+      }
+    }
+
+    const toRemove = rows.filter((row) => okSpuIds.has(Number(row.sku.spuId)));
+    for (const row of toRemove) {
+      await deleteCartItem(row.itemId);
+    }
+    selectedIds.value = selectedIds.value.filter((id) => !toRemove.some((row) => row.itemId === id));
+
+    if (toRemove.length) {
+      const parts = [];
+      if (favorited) parts.push(`新收藏 ${favorited}`);
+      if (already) parts.push(`已收藏 ${already}`);
+      ElMessage.success(`已移入收藏夹（${parts.join('，')}），并移除购物车 ${toRemove.length} 件`);
+    } else {
+      ElMessage.error('移入收藏失败，请稍后重试');
+    }
+    if (fail > 0) {
+      ElMessage.warning(`${fail} 种商品无法收藏（可能已下架）`);
+    }
+    await loadCart();
+  } catch (e) {
+    ElMessage.error(e.message || '移入收藏失败');
+  } finally {
+    movingFavorite.value = false;
   }
 }
 
@@ -286,6 +378,23 @@ onMounted(() => loadCart({ selectAll: true }));
             </el-checkbox>
             <el-button link type="primary" @click="router.push({ name: 'products' })">
               继续购物
+            </el-button>
+            <el-button
+              v-if="invalidCount > 0"
+              link
+              type="danger"
+              @click="onClearInvalid"
+            >
+              清除失效商品
+            </el-button>
+            <el-button
+              link
+              type="primary"
+              :disabled="selectedValidItems.length === 0"
+              :loading="movingFavorite"
+              @click="onMoveToFavorites"
+            >
+              移入收藏夹
             </el-button>
             <span class="footer-hint">已选 {{ selectedValidItems.length }} 件</span>
           </div>
