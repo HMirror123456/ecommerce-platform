@@ -1,23 +1,17 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Search } from '@element-plus/icons-vue';
 import { useAuthStore } from '@/stores/auth';
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
-const searchKeyword = ref('');
 const pageTitle = computed(() => route.meta.title || '');
 
 function onLogout() {
   auth.logout();
   router.push({ name: 'login' });
-}
-
-function onSearch() {
-  // P2 搜索功能，当前仅占位
 }
 </script>
 
@@ -26,19 +20,6 @@ function onSearch() {
     <el-header class="header">
       <div class="header-inner">
         <router-link to="/products" class="logo">电商平台</router-link>
-        <div class="search-wrap">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索商品"
-            clearable
-            class="search-input"
-            @keyup.enter="onSearch"
-          >
-            <template #append>
-              <el-button :icon="Search" @click="onSearch" />
-            </template>
-          </el-input>
-        </div>
         <div class="header-right">
           <router-link to="/products" class="nav-link">首页</router-link>
           <router-link to="/cart" class="nav-link">购物车</router-link>
@@ -96,20 +77,8 @@ function onSearch() {
   color: var(--color-primary);
   text-decoration: none;
 }
-.search-wrap {
-  flex: 1;
-  max-width: 480px;
-}
-.search-input :deep(.el-input-group__append) {
-  background: var(--color-primary);
-  color: #fff;
-  border-color: var(--color-primary);
-  box-shadow: none;
-}
-.search-input :deep(.el-input-group__append .el-button) {
-  color: #fff;
-}
 .header-right {
+  margin-left: auto;
   flex-shrink: 0;
   display: flex;
   align-items: center;

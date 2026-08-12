@@ -2,18 +2,31 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import ProductSearchBar from '@/components/ProductSearchBar.vue';
 import { deleteCartItem, fetchCartItems, updateCartItem } from '@/api/cart';
 
 const router = useRouter();
 const loading = ref(false);
 const items = ref([]);
 const updatingId = ref(null);
+const searchKeyword = ref('');
+const appliedKeyword = ref('');
+
+const filteredItems = computed(() => {
+  const kw = appliedKeyword.value.trim().toLowerCase();
+  if (!kw) return items.value;
+  return items.value.filter((item) => {
+    const title = String(item.sku?.title || '').toLowerCase();
+    const shop = String(item.sku?.shopName || '').toLowerCase();
+    return title.includes(kw) || shop.includes(kw);
+  });
+});
 
 const validItems = computed(() =>
-  items.value.filter((item) => item.sku?.title && item.sku.title !== '商品已下架'),
+  filteredItems.value.filter((item) => item.sku?.title && item.sku.title !== '商品已下架'),
 );
 
-const invalidCount = computed(() => items.value.length - validItems.value.length);
+const invalidCount = computed(() => filteredItems.value.length - validItems.value.length);
 
 const totalAmount = computed(() =>
   validItems.value.reduce((sum, item) => sum + (item.sku?.price || 0) * item.quantity, 0),
@@ -79,20 +92,40 @@ function goCheckout() {
   router.push({ name: 'checkout', query: { from: 'cart' } });
 }
 
+function onSearch(keyword) {
+  const next = String(keyword || '').trim();
+  searchKeyword.value = next;
+  appliedKeyword.value = next;
+}
+
 onMounted(loadCart);
 </script>
 
 <template>
   <div class="cart-page">
+    <div class="cart-toolbar">
+      <ProductSearchBar
+        v-model="searchKeyword"
+        placeholder="在购物车中搜索商品"
+        @search="onSearch"
+      />
+    </div>
+
     <div class="cart-body" v-loading="loading">
       <div v-if="!loading && items.length === 0" class="empty-tip">
         <p class="empty-text">购物车是空的，去挑几件喜欢的商品吧</p>
         <el-button type="primary" @click="router.push({ name: 'products' })">去逛逛</el-button>
       </div>
 
-      <template v-else-if="items.length > 0">
+      <div v-else-if="!loading && filteredItems.length === 0" class="empty-tip compact">
+        <p class="empty-text">没有找到匹配「{{ appliedKeyword }}」的购物车商品</p>
+        <el-button @click="onSearch('')">清空搜索</el-button>
+      </div>
+
+      <template v-else-if="filteredItems.length > 0">
         <p class="page-subtitle">
-          共 {{ items.length }} 件
+          共 {{ filteredItems.length }} 件
+          <template v-if="appliedKeyword">（关键词「{{ appliedKeyword }}」）</template>
           <template v-if="invalidCount > 0">（含 {{ invalidCount }} 件失效）</template>
         </p>
 
@@ -106,7 +139,7 @@ onMounted(loadCart);
           </div>
 
           <div
-            v-for="row in items"
+            v-for="row in filteredItems"
             :key="row.itemId"
             class="cart-row"
             :class="{ invalid: isInvalid(row) }"
@@ -195,6 +228,12 @@ onMounted(loadCart);
   padding-bottom: 32px;
 }
 
+.cart-toolbar {
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .cart-body {
   width: 100%;
   min-height: 160px;
@@ -215,6 +254,10 @@ onMounted(loadCart);
   text-align: center;
   min-height: calc(100vh - 220px);
   padding: 24px;
+}
+
+.empty-tip.compact {
+  min-height: 240px;
 }
 
 .empty-text {

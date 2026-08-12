@@ -279,6 +279,16 @@ paths:
           in: query
           schema:
             type: integer
+        - name: keyword
+          in: query
+          description: 按商品标题关键词模糊搜索
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: keyword 的兼容别名
+          schema:
+            type: string
         - name: page
           in: query
           schema:

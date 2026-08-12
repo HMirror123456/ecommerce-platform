@@ -1,12 +1,25 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import ProductSearchBar from '@/components/ProductSearchBar.vue';
 import { fetchFavorites, removeFavorite } from '@/api/favorite';
 
 const router = useRouter();
 const loading = ref(false);
 const list = ref([]);
+const searchKeyword = ref('');
+const appliedKeyword = ref('');
+
+const filteredList = computed(() => {
+  const kw = appliedKeyword.value.trim().toLowerCase();
+  if (!kw) return list.value;
+  return list.value.filter((item) => {
+    const title = String(item.title || '').toLowerCase();
+    const shop = String(item.shopName || '').toLowerCase();
+    return title.includes(kw) || shop.includes(kw);
+  });
+});
 
 function formatPrice(value) {
   if (value == null || Number.isNaN(Number(value))) return '-';
@@ -49,19 +62,39 @@ async function onRemove(item) {
   }
 }
 
+function onSearch(keyword) {
+  const next = String(keyword || '').trim();
+  searchKeyword.value = next;
+  appliedKeyword.value = next;
+}
+
 onMounted(loadList);
 </script>
 
 <template>
   <div class="favorite-page" v-loading="loading">
-    <h2 class="page-title">我的收藏</h2>
+    <div class="page-header">
+      <h2 class="page-title">我的收藏</h2>
+      <ProductSearchBar
+        v-model="searchKeyword"
+        placeholder="在收藏中搜索商品"
+        @search="onSearch"
+      />
+    </div>
 
     <el-empty v-if="!loading && list.length === 0" description="还没有收藏商品">
       <el-button type="primary" @click="router.push({ name: 'products' })">去逛逛</el-button>
     </el-empty>
 
+    <el-empty
+      v-else-if="!loading && filteredList.length === 0"
+      :description="`没有找到匹配「${appliedKeyword}」的收藏`"
+    >
+      <el-button @click="onSearch('')">清空搜索</el-button>
+    </el-empty>
+
     <div v-else class="favorite-grid">
-      <article v-for="item in list" :key="item.favoriteId" class="favorite-card">
+      <article v-for="item in filteredList" :key="item.favoriteId" class="favorite-card">
         <div class="image-wrap" @click="goDetail(item)">
           <img
             v-if="item.mainImage"
@@ -87,7 +120,15 @@ onMounted(loadList);
 </template>
 
 <style scoped>
-.page-title { margin: 0 0 16px; font-size: 20px; }
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.page-title { margin: 0; font-size: 20px; }
 .favorite-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import ProductSearchBar from '@/components/ProductSearchBar.vue';
 import { fetchCategories, fetchProductList } from '@/api/product';
 
 const route = useRoute();
@@ -14,8 +15,10 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = ref(12);
 const activeCategoryId = ref(null);
+const searchKeyword = ref('');
 
 const pageTitle = computed(() => {
+  if (searchKeyword.value) return `搜索「${searchKeyword.value}」`;
   if (activeCategoryId.value == null) return '全部商品';
   return findCategoryName(categories.value, activeCategoryId.value) || '商品列表';
 });
@@ -42,6 +45,18 @@ function parseCategoryFromRoute() {
   return Number.isInteger(id) ? id : null;
 }
 
+function parseKeywordFromRoute() {
+  const raw = route.query.keyword ?? route.query.q;
+  return raw == null ? '' : String(raw).trim();
+}
+
+function buildProductsQuery({ categoryId, keyword } = {}) {
+  const query = {};
+  if (categoryId != null) query.categoryId = String(categoryId);
+  if (keyword) query.keyword = keyword;
+  return query;
+}
+
 async function loadCategories() {
   try {
     categories.value = await fetchCategories();
@@ -57,6 +72,9 @@ async function loadProducts() {
     const params = { page: page.value, pageSize: pageSize.value };
     if (activeCategoryId.value != null) {
       params.categoryId = activeCategoryId.value;
+    }
+    if (searchKeyword.value) {
+      params.keyword = searchKeyword.value;
     }
     const data = await fetchProductList(params);
     products.value = data.list || [];
@@ -76,7 +94,17 @@ function selectCategory(categoryId) {
   activeCategoryId.value = nextId;
   router.replace({
     name: 'products',
-    query: nextId == null ? {} : { categoryId: String(nextId) },
+    query: buildProductsQuery({ categoryId: nextId, keyword: searchKeyword.value }),
+  });
+}
+
+function onSearch(keyword) {
+  const next = String(keyword || '').trim();
+  page.value = 1;
+  searchKeyword.value = next;
+  router.replace({
+    name: 'products',
+    query: buildProductsQuery({ categoryId: activeCategoryId.value, keyword: next }),
   });
 }
 
@@ -90,9 +118,10 @@ function goDetail(spuId) {
 }
 
 watch(
-  () => route.query.categoryId,
+  () => [route.query.categoryId, route.query.keyword, route.query.q],
   () => {
     activeCategoryId.value = parseCategoryFromRoute();
+    searchKeyword.value = parseKeywordFromRoute();
     page.value = 1;
     loadProducts();
   },
@@ -100,6 +129,7 @@ watch(
 
 onMounted(async () => {
   activeCategoryId.value = parseCategoryFromRoute();
+  searchKeyword.value = parseKeywordFromRoute();
   await loadCategories();
   await loadProducts();
 });
@@ -108,8 +138,13 @@ onMounted(async () => {
 <template>
   <div class="product-list-page">
     <div class="page-header">
-      <h1 class="page-title">{{ pageTitle }}</h1>
-      <p class="page-subtitle">按分类浏览，精选好物</p>
+      <div class="header-top">
+        <div>
+          <h1 class="page-title">{{ pageTitle }}</h1>
+          <p class="page-subtitle">按分类浏览，或输入关键词搜索商品</p>
+        </div>
+        <ProductSearchBar v-model="searchKeyword" @search="onSearch" />
+      </div>
     </div>
 
     <div class="content-layout">
@@ -160,7 +195,10 @@ onMounted(async () => {
           </div>
         </div>
 
-        <el-empty v-else-if="products.length === 0" description="该分类下暂无上架商品" />
+        <el-empty
+          v-else-if="products.length === 0"
+          :description="searchKeyword ? '没有找到相关商品' : '该分类下暂无上架商品'"
+        />
 
         <div v-else class="product-grid">
           <article
@@ -207,6 +245,14 @@ onMounted(async () => {
 
 .page-header {
   margin-bottom: 24px;
+}
+
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .page-title {

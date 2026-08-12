@@ -710,13 +710,13 @@ export async function getAdminProductDetail(spuId) {
   return productRepo.findById(spuId);
 }
 
-export async function getPublicProducts(page = 1, pageSize = 20, categoryId) {
+export async function getPublicProducts(page = 1, pageSize = 20, categoryId, keyword) {
   await expirePendingOrders();
   let categoryIds;
   if (categoryId != null && categoryId !== '') {
     categoryIds = await categoryRepo.getCategoryFilterIds(categoryId);
   }
-  return productRepo.listPublicProducts({ page, pageSize, categoryIds });
+  return productRepo.listPublicProducts({ page, pageSize, categoryIds, keyword });
 }
 
 export async function getCategories() {
