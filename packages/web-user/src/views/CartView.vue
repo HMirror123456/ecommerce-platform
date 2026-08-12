@@ -112,15 +112,19 @@ onMounted(loadCart);
     </div>
 
     <div class="cart-body" v-loading="loading">
-      <div v-if="!loading && items.length === 0" class="empty-tip">
-        <p class="empty-text">购物车是空的，去挑几件喜欢的商品吧</p>
+      <el-empty
+        v-if="!loading && items.length === 0"
+        description="购物车是空的，去挑几件喜欢的商品吧"
+      >
         <el-button type="primary" @click="router.push({ name: 'products' })">去逛逛</el-button>
-      </div>
+      </el-empty>
 
-      <div v-else-if="!loading && filteredItems.length === 0" class="empty-tip compact">
-        <p class="empty-text">没有找到匹配「{{ appliedKeyword }}」的购物车商品</p>
+      <el-empty
+        v-else-if="!loading && filteredItems.length === 0"
+        :description="`没有找到匹配「${appliedKeyword}」的购物车商品`"
+      >
         <el-button @click="onSearch('')">清空搜索</el-button>
-      </div>
+      </el-empty>
 
       <template v-else-if="filteredItems.length > 0">
         <p class="page-subtitle">
@@ -244,26 +248,6 @@ onMounted(loadCart);
   font-size: 13px;
   color: var(--text-muted);
   text-align: left;
-}
-
-.empty-tip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  min-height: calc(100vh - 220px);
-  padding: 24px;
-}
-
-.empty-tip.compact {
-  min-height: 240px;
-}
-
-.empty-text {
-  margin: 0 0 16px;
-  font-size: 14px;
-  color: var(--text-muted);
 }
 
 .cart-card {
