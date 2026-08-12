@@ -1,10 +1,12 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRouter } from 'vue-router';
 import { getDashboardSummary } from '@/api/merchant';
+import { useAuthStore } from '@/stores/auth';
 
 const router = useRouter();
+const auth = useAuthStore();
 const loading = ref(false);
 const summary = ref({
   merchantId: null,
@@ -35,6 +37,13 @@ const quickLinks = [
   { label: '去订单管理', description: '查看待发货订单并填写物流', path: '/orders' },
 ];
 
+const shopInfo = computed(() => ({
+  merchantId: summary.value.merchantId || auth.merchantId || '-',
+  username: auth.username || '-',
+  shopId: summary.value.shopId || auth.shopId || '-',
+  shopName: summary.value.shopName || auth.shopName || '-',
+}));
+
 function getNumber(key) {
   return Number(summary.value?.[key]) || 0;
 }
@@ -60,12 +69,31 @@ onMounted(loadSummary);
       <template #header>
         <div class="card-header">
           <div>
+            <div class="title">店铺信息</div>
+            <div class="description">当前登录商家的基础信息，来自商家账号和店铺数据</div>
+          </div>
+          <el-tag type="success">已入驻</el-tag>
+        </div>
+      </template>
+
+      <el-descriptions :column="4" border>
+        <el-descriptions-item label="商家 ID">{{ shopInfo.merchantId }}</el-descriptions-item>
+        <el-descriptions-item label="登录账号">{{ shopInfo.username }}</el-descriptions-item>
+        <el-descriptions-item label="店铺 ID">{{ shopInfo.shopId }}</el-descriptions-item>
+        <el-descriptions-item label="店铺名称">{{ shopInfo.shopName }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
+    <el-card shadow="never">
+      <template #header>
+        <div class="card-header">
+          <div>
             <div class="title">商家工作台</div>
             <div class="description">
               {{ summary.shopName || '当前店铺' }} 的商品审核与订单履约概览
             </div>
           </div>
-          <el-button @click="loadSummary">刷新</el-button>
+          <el-button :loading="loading" :disabled="loading" @click="loadSummary">刷新</el-button>
         </div>
       </template>
 

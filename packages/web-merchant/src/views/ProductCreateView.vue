@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -24,6 +24,8 @@ const categoryProps = {
   children: 'children',
   emitPath: false,
 };
+const DEFAULT_MAIN_IMAGE = 'https://picsum.photos/seed/merchant-product-default/400/400';
+const mainImageLoadFailed = ref(false);
 
 function createSku() {
   return {
@@ -43,14 +45,14 @@ const form = ref({
   skus: [createSku()],
 });
 
-const nonNegativeNumberRule = (message) => ({
+const positiveNumberRule = (message) => ({
   validator: (_rule, value, callback) => {
     if (value == null || value === '') {
       callback(new Error(message));
       return;
     }
-    if (!Number.isFinite(Number(value)) || Number(value) < 0) {
-      callback(new Error('请输入不小于 0 的数字'));
+    if (!Number.isFinite(Number(value)) || Number(value) <= 0) {
+      callback(new Error('请输入大于 0 的数字'));
       return;
     }
     callback();
@@ -84,6 +86,58 @@ const requiredTrimRule = (message) => ({
   trigger: 'blur',
 });
 
+function isValidHttpUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  try {
+    const url = new URL(text);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+const mainImageUrlRule = {
+  validator: (_rule, value, callback) => {
+    if (!String(value || '').trim()) {
+      callback(new Error('请输入商品主图地址'));
+      return;
+    }
+    if (!isValidHttpUrl(value)) {
+      callback(new Error('请输入以 http:// 或 https:// 开头的图片 URL'));
+      return;
+    }
+    callback();
+  },
+  trigger: ['blur', 'change'],
+};
+
+function getSkuSpecKey(sku) {
+  const specName = String(sku?.specName || '').trim().toLowerCase();
+  const specValue = String(sku?.specValue || '').trim().toLowerCase();
+  return specName && specValue ? `${specName}=${specValue}` : '';
+}
+
+function isDuplicateSkuSpec(index) {
+  const key = getSkuSpecKey(form.value.skus[index]);
+  if (!key) return false;
+  return form.value.skus.some((sku, currentIndex) => (
+    currentIndex !== index && getSkuSpecKey(sku) === key
+  ));
+}
+
+const skuDuplicateRule = {
+  validator: (rule, _value, callback) => {
+    const index = Number(String(rule.field || '').split('.')[1]);
+    if (Number.isInteger(index) && isDuplicateSkuSpec(index)) {
+      callback(new Error('SKU 规格不能重复'));
+      return;
+    }
+    callback();
+  },
+  trigger: ['blur', 'change'],
+};
+
 const rules = {
   categoryId: [
     {
@@ -103,16 +157,35 @@ const rules = {
   ],
   title: [requiredTrimRule('请输入商品标题')],
   description: [requiredTrimRule('请输入商品描述')],
-  mainImage: [requiredTrimRule('请输入商品主图地址')],
+  mainImage: [mainImageUrlRule],
 };
 
-const skuSpecNameRules = [requiredTrimRule('请输入规格名')];
-const skuSpecValueRules = [requiredTrimRule('请输入规格值')];
-const skuPriceRules = [nonNegativeNumberRule('请输入价格')];
+const skuSpecNameRules = [requiredTrimRule('请输入规格名'), skuDuplicateRule];
+const skuSpecValueRules = [requiredTrimRule('请输入规格值'), skuDuplicateRule];
+const skuPriceRules = [positiveNumberRule('请输入价格')];
 const skuAvailableRules = [nonNegativeIntegerRule('请输入可用库存')];
 
 function getSkuField(index, field) {
   return `skus.${index}.${field}`;
+}
+
+const mainImagePreviewUrl = computed(() => {
+  const value = form.value.mainImage;
+  return isValidHttpUrl(value) ? value.trim() : '';
+});
+
+function useDefaultMainImage() {
+  form.value.mainImage = DEFAULT_MAIN_IMAGE;
+  mainImageLoadFailed.value = false;
+  formRef.value?.clearValidate('mainImage');
+}
+
+function handleMainImageLoad() {
+  mainImageLoadFailed.value = false;
+}
+
+function handleMainImageError() {
+  mainImageLoadFailed.value = true;
 }
 
 async function loadCategories() {
@@ -201,6 +274,7 @@ function buildPayload() {
 }
 
 async function submitProduct() {
+  if (submitting.value) return;
   const hasSku = form.value.skus.some((sku) =>
     String(sku.specName || '').trim()
     || String(sku.specValue || '').trim()
@@ -236,6 +310,13 @@ onMounted(async () => {
   await loadCategories();
   await loadProductDetail();
 });
+
+watch(
+  () => form.value.mainImage,
+  () => {
+    mainImageLoadFailed.value = false;
+  },
+);
 </script>
 
 <template>
@@ -287,7 +368,24 @@ onMounted(async () => {
       </el-form-item>
 
       <el-form-item label="商品主图地址" prop="mainImage">
-        <el-input v-model="form.mainImage" placeholder="https://..." />
+        <div class="main-image-field">
+          <div class="main-image-input">
+            <el-input v-model="form.mainImage" placeholder="https://..." />
+            <el-button @click="useDefaultMainImage">使用默认图</el-button>
+          </div>
+          <div class="main-image-preview">
+            <img
+              v-if="mainImagePreviewUrl && !mainImageLoadFailed"
+              :src="mainImagePreviewUrl"
+              alt="商品主图预览"
+              @load="handleMainImageLoad"
+              @error="handleMainImageError"
+            >
+            <div v-else class="main-image-placeholder">
+              {{ mainImagePreviewUrl ? '图片加载失败，请检查 URL' : '输入图片 URL 后显示预览' }}
+            </div>
+          </div>
+        </div>
       </el-form-item>
 
       <div class="section-header">
@@ -329,7 +427,7 @@ onMounted(async () => {
           </el-col>
           <el-col :xs="24" :sm="6">
             <el-form-item label="价格" :prop="getSkuField(index, 'price')" :rules="skuPriceRules">
-              <el-input-number v-model="sku.price" :min="0" :precision="2" controls-position="right" class="full-width" />
+              <el-input-number v-model="sku.price" :min="0.01" :precision="2" controls-position="right" class="full-width" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="6">
@@ -380,6 +478,42 @@ onMounted(async () => {
 }
 .product-form { max-width: 960px; }
 .full-width { width: 100%; }
+.main-image-field {
+  width: 100%;
+}
+.main-image-input {
+  display: flex;
+  gap: 12px;
+}
+.main-image-input .el-input {
+  flex: 1;
+}
+.main-image-preview {
+  margin-top: 12px;
+  width: 160px;
+  height: 160px;
+  overflow: hidden;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.main-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.main-image-placeholder {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: #999;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
 .section-header {
   margin: 8px 0 12px;
   display: flex;

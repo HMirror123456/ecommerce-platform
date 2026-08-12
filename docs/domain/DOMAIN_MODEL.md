@@ -174,7 +174,7 @@ stateDiagram-v2
     PENDING_AUDIT --> REJECTED: 审核驳回
     REJECTED --> PENDING_AUDIT: 修改后重新提交审核
     ON_SHELF --> OFF_SHELF: 下架
-    OFF_SHELF --> ON_SHELF: 重新上架需再审或免审
+    OFF_SHELF --> PENDING_AUDIT: 重新上架需再审
 ```
 
 | 状态 | 英文 | C 端可见 |

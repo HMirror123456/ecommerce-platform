@@ -62,6 +62,23 @@ export async function createStock(conn, { skuId, available, locked = 0, updatedA
   );
 }
 
+export async function setAvailable(conn, skuId, available) {
+  const db = conn || pool;
+  const value = Number(available);
+  if (!Number.isInteger(value) || value < 0) {
+    return { error: 'INVALID_AVAILABLE', message: '可用库存必须是不小于 0 的整数' };
+  }
+  const stock = await getStock(db, skuId);
+  if (!stock) return { error: 'SKU_NOT_FOUND', message: 'SKU 不存在' };
+  await db.query(
+    `UPDATE stocks
+     SET available = ?, updated_at = NOW(3)
+     WHERE sku_id = ?`,
+    [value, skuId],
+  );
+  return { ok: true, stock: await getStock(db, skuId) };
+}
+
 export async function lockStock(...args) {
   const { db, skuId, quantity } = resolveDbAndArgs(args);
   const qty = Number(quantity);

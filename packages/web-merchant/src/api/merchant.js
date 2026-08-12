@@ -28,8 +28,8 @@ export function shipMerchantOrder(subOrderId, payload) {
   return client.post(`/merchant/orders/${subOrderId}/ship`, payload).then((r) => r.data);
 }
 
-export function fetchMerchantProducts() {
-  return client.get('/merchant/products').then((r) => r.data);
+export function fetchMerchantProducts(params) {
+  return client.get('/merchant/products', { params }).then((r) => r.data);
 }
 
 export function fetchMerchantProduct(spuId) {
@@ -48,8 +48,20 @@ export function submitMerchantProductAudit(spuId) {
   return client.post(`/merchant/products/${spuId}/submit-audit`).then((r) => r.data);
 }
 
+export function batchSubmitMerchantProductAudit(spuIds) {
+  return client.post('/merchant/products/batch-submit-audit', { spuIds }).then((r) => r.data);
+}
+
 export function offShelfMerchantProduct(spuId) {
   return client.post(`/merchant/products/${spuId}/off-shelf`).then((r) => r.data);
+}
+
+export function batchOffShelfMerchantProducts(spuIds) {
+  return client.post('/merchant/products/batch-off-shelf', { spuIds }).then((r) => r.data);
+}
+
+export function updateMerchantSkuStock(skuId, payload) {
+  return client.patch(`/merchant/skus/${skuId}/stock`, payload).then((r) => r.data);
 }
 
 export function getAfterSales(params) {

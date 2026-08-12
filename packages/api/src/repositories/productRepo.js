@@ -119,6 +119,17 @@ function mapPendingRow(row) {
   };
 }
 
+function normalizePagination({ page = 1, pageSize = 20 } = {}) {
+  const normalizedPage = Math.max(1, Number(page) || 1);
+  const normalizedPageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
+  return { page: normalizedPage, pageSize: normalizedPageSize };
+}
+
+function normalizeBatchSpuIds(spuIds) {
+  if (!Array.isArray(spuIds)) return [];
+  return [...new Set(spuIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+}
+
 export async function listPublicProducts({ page = 1, pageSize = 20, categoryIds } = {}) {
   const where = ['status = ?'];
   const params = ['ON_SHELF'];
@@ -189,16 +200,54 @@ export async function findSkuSnapshot(skuId) {
   };
 }
 
-export async function listByMerchant(merchantId) {
+export async function listByMerchant(merchantId, options = {}) {
+  const { page, pageSize } = normalizePagination(options);
+  const where = ['s.merchant_id = ?'];
+  const params = [merchantId];
+  const keyword = String(options.keyword || options.q || '').trim();
+  if (keyword) {
+    const like = `%${keyword}%`;
+    where.push(`(
+      s.title LIKE ?
+      OR CAST(s.spu_id AS CHAR) LIKE ?
+      OR CAST(s.category_id AS CHAR) LIKE ?
+      OR c.name LIKE ?
+      OR pc.name LIKE ?
+    )`);
+    params.push(like, like, like, like, like);
+  }
+  if (options.status) {
+    where.push('s.status = ?');
+    params.push(String(options.status));
+  }
+  if (Array.isArray(options.categoryIds) && options.categoryIds.length) {
+    where.push(`s.category_id IN (${options.categoryIds.map(() => '?').join(',')})`);
+    params.push(...options.categoryIds.map((id) => Number(id)));
+  }
+
+  const whereSql = where.join(' AND ');
+  const [countRows] = await pool.query(
+    `SELECT COUNT(*) AS cnt
+     FROM spus s
+     LEFT JOIN categories c ON c.id = s.category_id
+     LEFT JOIN categories pc ON pc.id = c.parent_id
+     WHERE ${whereSql}`,
+    params,
+  );
+  const total = Number(countRows[0]?.cnt) || 0;
+  const offset = (page - 1) * pageSize;
   const [rows] = await pool.query(
-    `SELECT spu_id
-     FROM spus
-     WHERE merchant_id = ?
-     ORDER BY spu_id ASC`,
-    [merchantId],
+    `SELECT s.spu_id
+     FROM spus s
+     LEFT JOIN categories c ON c.id = s.category_id
+     LEFT JOIN categories pc ON pc.id = c.parent_id
+     WHERE ${whereSql}
+     ORDER BY s.updated_at DESC, s.spu_id DESC
+     LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset],
   );
   const list = await loadProductGraphs(rows.map((row) => row.spu_id));
-  return { total: list.length, list };
+  return { total, page, pageSize, items: list, list };
 }
 
 export async function findById(spuId) {
@@ -345,6 +394,55 @@ export async function updateMerchantProduct(merchant, spuId, payload) {
   }
 }
 
+export async function updateMerchantSkuStock(merchant, skuId, available) {
+  const id = Number(skuId);
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      `SELECT sku.sku_id, spu.merchant_id
+       FROM skus sku
+       JOIN spus spu ON spu.spu_id = sku.spu_id
+       WHERE sku.sku_id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [id],
+    );
+    const sku = rows[0];
+    if (!sku) {
+      await conn.rollback();
+      return { error: 'NOT_FOUND', message: 'SKU not found' };
+    }
+    if (sku.merchant_id !== merchant.id) {
+      await conn.rollback();
+      return { error: 'FORBIDDEN', message: 'No permission to operate this SKU' };
+    }
+
+    const result = await stockRepo.setAvailable(conn, id, available);
+    if (result.error) {
+      await conn.rollback();
+      return {
+        error: result.error === 'INVALID_AVAILABLE' ? 'INVALID_INPUT' : 'NOT_FOUND',
+        message: result.message,
+      };
+    }
+
+    await conn.commit();
+    return {
+      skuId: id,
+      stock: {
+        available: result.stock.available,
+        locked: result.stock.locked,
+      },
+    };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function offShelfMerchantProduct(merchant, spuId) {
   const conn = await pool.getConnection();
   try {
@@ -391,6 +489,120 @@ export async function offShelfMerchantProduct(merchant, spuId) {
   }
 }
 
+export async function batchSubmitMerchantProductAudit(merchant, spuIds) {
+  const ids = normalizeBatchSpuIds(spuIds);
+  if (!ids.length) {
+    return { error: 'INVALID_INPUT', message: 'spuIds is required' };
+  }
+  const allowedStatuses = ['DRAFT', 'REJECTED', 'OFF_SHELF'];
+  const conn = await pool.getConnection();
+  const results = [];
+  try {
+    await conn.beginTransaction();
+    for (const spuId of ids) {
+      const [rows] = await conn.query(
+        `SELECT spu_id, merchant_id, status
+         FROM spus
+         WHERE spu_id = ?
+         LIMIT 1
+         FOR UPDATE`,
+        [spuId],
+      );
+      const spu = rows[0];
+      if (!spu) {
+        results.push({ spuId, success: false, reason: 'Product not found' });
+        continue;
+      }
+      if (spu.merchant_id !== merchant.id) {
+        results.push({ spuId, success: false, reason: 'No permission to operate this product' });
+        continue;
+      }
+      if (!allowedStatuses.includes(spu.status)) {
+        results.push({ spuId, success: false, status: spu.status, reason: 'Current product status cannot be submitted' });
+        continue;
+      }
+      const submittedAt = new Date();
+      await conn.query(
+        `UPDATE spus
+         SET status = 'PENDING_AUDIT', submitted_at = ?, reject_reason = NULL, updated_at = ?
+         WHERE spu_id = ?`,
+        [submittedAt, submittedAt, spuId],
+      );
+      results.push({ spuId, success: true, status: 'PENDING_AUDIT' });
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+  const successCount = results.filter((item) => item.success).length;
+  const failures = results.filter((item) => !item.success);
+  return {
+    successCount,
+    failureCount: failures.length,
+    failures,
+    results,
+  };
+}
+
+export async function batchOffShelfMerchantProducts(merchant, spuIds) {
+  const ids = normalizeBatchSpuIds(spuIds);
+  if (!ids.length) {
+    return { error: 'INVALID_INPUT', message: 'spuIds is required' };
+  }
+  const conn = await pool.getConnection();
+  const results = [];
+  try {
+    await conn.beginTransaction();
+    for (const spuId of ids) {
+      const [rows] = await conn.query(
+        `SELECT spu_id, merchant_id, status
+         FROM spus
+         WHERE spu_id = ?
+         LIMIT 1
+         FOR UPDATE`,
+        [spuId],
+      );
+      const spu = rows[0];
+      if (!spu) {
+        results.push({ spuId, success: false, reason: 'Product not found' });
+        continue;
+      }
+      if (spu.merchant_id !== merchant.id) {
+        results.push({ spuId, success: false, reason: 'No permission to operate this product' });
+        continue;
+      }
+      if (spu.status !== 'ON_SHELF') {
+        results.push({ spuId, success: false, status: spu.status, reason: 'Current product status cannot be taken off shelf' });
+        continue;
+      }
+      await conn.query(
+        `UPDATE spus
+         SET status = 'OFF_SHELF', updated_at = ?
+         WHERE spu_id = ?`,
+        [new Date(), spuId],
+      );
+      results.push({ spuId, success: true, status: 'OFF_SHELF' });
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+  const successCount = results.filter((item) => item.success).length;
+  const failures = results.filter((item) => !item.success);
+  return {
+    successCount,
+    failureCount: failures.length,
+    failures,
+    results,
+  };
+}
+
 export async function submitMerchantProductAudit(merchant, spuId) {
   const conn = await pool.getConnection();
   try {
@@ -412,9 +624,9 @@ export async function submitMerchantProductAudit(merchant, spuId) {
       await conn.rollback();
       return { error: 'FORBIDDEN', message: 'No permission to operate this product' };
     }
-    if (spu.status !== 'DRAFT' && spu.status !== 'REJECTED') {
+    if (spu.status !== 'DRAFT' && spu.status !== 'REJECTED' && spu.status !== 'OFF_SHELF') {
       await conn.rollback();
-      return { error: 'INVALID_STATE', message: 'Only draft or rejected products can be submitted' };
+      return { error: 'INVALID_STATE', message: 'Only draft, rejected, or off-shelf products can be submitted' };
     }
 
     const submittedAt = new Date();
