@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
   const userId = ref(null);
   const phone = ref('');
   const nickname = ref('');
+  const avatarUrl = ref('');
 
   const isLoggedIn = computed(() => Boolean(token.value));
 
@@ -19,6 +20,7 @@ export const useAuthStore = defineStore('auth', () => {
         userId: userId.value,
         phone: phone.value,
         nickname: nickname.value,
+        avatarUrl: avatarUrl.value,
       }),
     );
   }
@@ -32,6 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
       userId.value = data.userId ?? null;
       phone.value = data.phone || '';
       nickname.value = data.nickname || '';
+      avatarUrl.value = data.avatarUrl || '';
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }
@@ -42,6 +45,7 @@ export const useAuthStore = defineStore('auth', () => {
     userId.value = data.userId;
     phone.value = loginPhone;
     nickname.value = data.nickname || '';
+    avatarUrl.value = data.avatarUrl || '';
     persist();
   }
 
@@ -49,6 +53,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (profile?.userId != null) userId.value = profile.userId;
     if (profile?.phone) phone.value = profile.phone;
     if (profile?.nickname !== undefined) nickname.value = profile.nickname || '';
+    if (profile?.avatarUrl !== undefined) avatarUrl.value = profile.avatarUrl || '';
     persist();
   }
 
@@ -57,6 +62,7 @@ export const useAuthStore = defineStore('auth', () => {
     userId.value = null;
     phone.value = '';
     nickname.value = '';
+    avatarUrl.value = '';
     localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -65,6 +71,7 @@ export const useAuthStore = defineStore('auth', () => {
     userId,
     phone,
     nickname,
+    avatarUrl,
     isLoggedIn,
     setSession,
     setProfile,

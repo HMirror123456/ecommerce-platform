@@ -515,12 +515,30 @@ export async function findUserById(id) {
   return userRepo.findById(id);
 }
 
+const AVATAR_MAX_LENGTH = 300000;
+const AVATAR_HTTP_RE = /^https?:\/\/.+/i;
+const AVATAR_DATA_RE = /^data:image\/(jpeg|jpg|png|gif|webp);base64,[a-z0-9+/=\s]+$/i;
+
+function normalizeAvatarUrl(value) {
+  if (value == null) return { avatarUrl: null };
+  const avatarUrl = String(value).trim();
+  if (!avatarUrl) return { avatarUrl: null };
+  if (avatarUrl.length > AVATAR_MAX_LENGTH) {
+    return { error: 'INVALID_INPUT', message: '头像文件过大，请选择约 200KB 以内的图片' };
+  }
+  if (AVATAR_HTTP_RE.test(avatarUrl) || AVATAR_DATA_RE.test(avatarUrl)) {
+    return { avatarUrl };
+  }
+  return { error: 'INVALID_INPUT', message: '头像须为 http(s) 图片地址或本地上传的图片' };
+}
+
 export function serializeUserProfile(user) {
   if (!user) return null;
   return {
     userId: user.id,
     phone: user.phone,
     nickname: user.nickname || null,
+    avatarUrl: user.avatarUrl || null,
   };
 }
 
@@ -530,7 +548,7 @@ export async function getUserProfile(userId) {
   return serializeUserProfile(user);
 }
 
-/** 领域规则：手机号唯一且不可改；可改昵称；改密需校验原密码 */
+/** 领域规则：手机号唯一且不可改；可改昵称/头像；改密需校验原密码 */
 export async function updateUserProfile(userId, payload = {}) {
   const user = await userRepo.findById(userId);
   if (!user) return { error: 'NOT_FOUND', message: '用户不存在' };
@@ -541,6 +559,12 @@ export async function updateUserProfile(userId, payload = {}) {
     if (!nickname) return { error: 'INVALID_INPUT', message: '昵称不能为空' };
     if (nickname.length > 64) return { error: 'INVALID_INPUT', message: '昵称最多 64 个字符' };
     updates.nickname = nickname;
+  }
+
+  if (payload.avatarUrl !== undefined) {
+    const normalized = normalizeAvatarUrl(payload.avatarUrl);
+    if (normalized.error) return normalized;
+    updates.avatarUrl = normalized.avatarUrl;
   }
 
   const { currentPassword, newPassword } = payload;

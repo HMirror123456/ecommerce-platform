@@ -29,7 +29,10 @@ const displayName = computed(() => auth.nickname || auth.phone || '用户');
   <div class="profile-layout">
     <aside class="side">
       <div class="user-card">
-        <div class="avatar">{{ displayName.slice(0, 1) }}</div>
+        <div class="avatar">
+          <img v-if="auth.avatarUrl" :src="auth.avatarUrl" alt="" class="avatar-img" />
+          <span v-else>{{ displayName.slice(0, 1) }}</span>
+        </div>
         <div class="meta">
           <p class="name">{{ displayName }}</p>
           <p class="phone">{{ auth.phone }}</p>
@@ -98,6 +101,14 @@ const displayName = computed(() => auth.nickname || auth.phone || '用户');
   font-size: 20px;
   font-weight: 700;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .name {

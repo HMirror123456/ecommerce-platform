@@ -40,12 +40,6 @@ function onLogout() {
       </p>
       <router-view />
     </el-main>
-
-    <el-footer class="footer">
-      <div class="footer-inner">
-        <span>© 2026 电商平台 · 课程演示项目</span>
-      </div>
-    </el-footer>
   </el-container>
 </template>
 
@@ -120,18 +114,5 @@ function onLogout() {
   font-size: 13px;
   color: var(--text-muted);
   text-align: left;
-}
-.footer {
-  height: auto;
-  padding: 24px;
-  background: #fff;
-  border-top: 1px solid var(--border-color);
-}
-.footer-inner {
-  max-width: 1200px;
-  margin: 0 auto;
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-muted);
 }
 </style>

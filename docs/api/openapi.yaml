@@ -2035,6 +2035,10 @@ components:
         nickname:
           type: string
           nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+          description: 头像 URL（可为空）
 
     UserProfile:
       type: object
@@ -2046,6 +2050,10 @@ components:
         nickname:
           type: string
           nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+          description: 头像 URL（可为空）
 
     FavoriteItem:
       type: object
@@ -2078,6 +2086,12 @@ components:
         nickname:
           type: string
           description: 昵称
+        avatarUrl:
+          type: string
+          nullable: true
+          description: |
+            头像图片地址。传空字符串可清除头像。
+            支持 http(s) URL，或演示用 data:image/*;base64,...（建议 ≤ 200KB）。
         currentPassword:
           type: string
           format: password

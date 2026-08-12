@@ -58,8 +58,8 @@ erDiagram
 ### 实体说明
 
 #### User（用户）
-- **属性**：`id`, `phone`, `passwordHash`, `nickname`, `createdAt`
-- **不变式**：手机号唯一
+- **属性**：`id`, `phone`, `passwordHash`, `nickname`, `avatarUrl`, `createdAt`
+- **不变式**：手机号唯一；`avatarUrl` 可选，为头像图片 URL（含演示用 data URL）
 
 #### Address（收货地址）
 - **属性**：`id`, `userId`, `receiverName`, `phone`, `province`, `city`, `district`, `detail`, `isDefault`

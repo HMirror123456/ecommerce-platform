@@ -19,6 +19,7 @@ router.post('/user/register', async (req, res) => {
       token: signUserToken(user),
       userId: user.id,
       nickname: user.nickname || null,
+      avatarUrl: user.avatarUrl || null,
     });
   } catch (err) {
     console.error(err);
@@ -36,6 +37,7 @@ router.post('/user/login', async (req, res) => {
       token: signUserToken(user),
       userId: user.id,
       nickname: user.nickname || null,
+      avatarUrl: user.avatarUrl || null,
     });
   } catch (err) {
     console.error(err);

@@ -21,35 +21,36 @@ async function loadAddresses(userId) {
   return rows.map(mapAddressRow);
 }
 
-export async function findByPhone(phone, password) {
-  const [rows] = await pool.query(
-    'SELECT id, phone, password, nickname FROM users WHERE phone = ? AND password = ? LIMIT 1',
-    [phone, password],
-  );
-  const row = rows[0];
+function mapUserRow(row) {
   if (!row) return null;
   return {
     id: row.id,
     phone: row.phone,
     password: row.password,
     nickname: row.nickname,
+    avatarUrl: row.avatar_url || null,
+  };
+}
+
+export async function findByPhone(phone, password) {
+  const [rows] = await pool.query(
+    'SELECT id, phone, password, nickname, avatar_url FROM users WHERE phone = ? AND password = ? LIMIT 1',
+    [phone, password],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    ...mapUserRow(row),
     addresses: await loadAddresses(row.id),
   };
 }
 
 export async function findByPhoneOnly(phone) {
   const [rows] = await pool.query(
-    'SELECT id, phone, password, nickname FROM users WHERE phone = ? LIMIT 1',
+    'SELECT id, phone, password, nickname, avatar_url FROM users WHERE phone = ? LIMIT 1',
     [phone],
   );
-  const row = rows[0];
-  if (!row) return null;
-  return {
-    id: row.id,
-    phone: row.phone,
-    password: row.password,
-    nickname: row.nickname,
-  };
+  return mapUserRow(rows[0]);
 }
 
 export async function createUser({ phone, password, nickname }) {
@@ -62,21 +63,18 @@ export async function createUser({ phone, password, nickname }) {
 
 export async function findById(id) {
   const [rows] = await pool.query(
-    'SELECT id, phone, password, nickname FROM users WHERE id = ? LIMIT 1',
+    'SELECT id, phone, password, nickname, avatar_url FROM users WHERE id = ? LIMIT 1',
     [id],
   );
   const row = rows[0];
   if (!row) return null;
   return {
-    id: row.id,
-    phone: row.phone,
-    password: row.password,
-    nickname: row.nickname,
+    ...mapUserRow(row),
     addresses: await loadAddresses(row.id),
   };
 }
 
-export async function updateProfile(userId, { nickname, password }) {
+export async function updateProfile(userId, { nickname, password, avatarUrl }) {
   const sets = [];
   const params = [];
   if (nickname !== undefined) {
@@ -86,6 +84,10 @@ export async function updateProfile(userId, { nickname, password }) {
   if (password !== undefined) {
     sets.push('password = ?');
     params.push(password);
+  }
+  if (avatarUrl !== undefined) {
+    sets.push('avatar_url = ?');
+    params.push(avatarUrl);
   }
   if (!sets.length) return findById(userId);
   params.push(userId);
