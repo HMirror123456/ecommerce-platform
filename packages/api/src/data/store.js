@@ -1479,14 +1479,44 @@ function buildAfterSaleCardPayload(item) {
   };
 }
 
+function buildOrderMerchantCardPayload(order, sub) {
+  const items = sub.items || [];
+  const amount = items.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 0), 0);
+  return {
+    afterSaleId: null,
+    orderId: order.orderId,
+    orderNo: order.orderNo,
+    shopName: sub.shopName,
+    merchantId: sub.merchantId,
+    orderStatus: order.status,
+    subOrderStatus: sub.status,
+    amount,
+    itemTitles: items.map((it) => it.title).filter(Boolean).slice(0, 3),
+  };
+}
+
 async function enrichThread(thread) {
   if (!thread) return null;
-  const item = await afterSaleRepo.findById(thread.afterSaleId);
+  if (thread.afterSaleId) {
+    const item = await afterSaleRepo.findById(thread.afterSaleId);
+    return {
+      ...thread,
+      afterSaleStatus: item ? item.status : null,
+      merchantId: thread.merchantId ?? (item ? item.merchantId : null),
+      shopName: item ? item.shopName : null,
+    };
+  }
+  let shopName = null;
+  if (thread.orderId && thread.merchantId) {
+    const order = await orderRepo.findById(thread.orderId);
+    const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
+    shopName = sub?.shopName || null;
+  }
   return {
     ...thread,
-    afterSaleStatus: item ? item.status : null,
-    merchantId: item ? item.merchantId : null,
-    shopName: item ? item.shopName : null,
+    afterSaleStatus: null,
+    merchantId: thread.merchantId,
+    shopName,
   };
 }
 
@@ -1508,11 +1538,14 @@ async function assertThreadAccess(actor, thread) {
     if (thread.type !== 'USER_MERCHANT') {
       return { error: 'FORBIDDEN', message: '商家仅可访问商家会话' };
     }
-    const item = await afterSaleRepo.findById(thread.afterSaleId);
-    if (!item || item.merchantId !== actor.merchant.id) {
-      return { error: 'FORBIDDEN', message: '无权访问该会话' };
+    if (thread.merchantId != null && thread.merchantId === actor.merchant.id) {
+      return null;
     }
-    return null;
+    if (thread.afterSaleId) {
+      const item = await afterSaleRepo.findById(thread.afterSaleId);
+      if (item && item.merchantId === actor.merchant.id) return null;
+    }
+    return { error: 'FORBIDDEN', message: '无权访问该会话' };
   }
   return { error: 'FORBIDDEN', message: '无权访问该会话' };
 }
@@ -1595,6 +1628,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
       orderId: item.orderId,
       orderNo: item.orderNo,
       userId: item.userId,
+      merchantId: item.merchantId,
       type: 'USER_MERCHANT',
     });
   } catch (err) {
@@ -1618,6 +1652,79 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
     msgType: 'CARD',
     content: '售后订单卡片',
     payload: buildAfterSaleCardPayload(item),
+  });
+
+  return { thread: await enrichThread(thread), created: true };
+}
+
+/**
+ * 订单级 USER_MERCHANT：待发货沟通（改色/催发货等）
+ * body: { merchantId } | { subOrderId }
+ */
+export async function ensureOrderMerchantThread(userId, orderId, body = {}) {
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+
+  let merchantId = body.merchantId != null ? Number(body.merchantId) : null;
+  let sub = null;
+  if (body.subOrderId != null) {
+    const subOrderId = Number(body.subOrderId);
+    sub = (order.subOrders || []).find((s) => s.subOrderId === subOrderId);
+    if (!sub) return { error: 'NOT_FOUND', message: '子订单不存在' };
+    merchantId = sub.merchantId;
+  } else if (merchantId != null) {
+    sub = (order.subOrders || []).find((s) => s.merchantId === merchantId);
+    if (!sub) return { error: 'NOT_FOUND', message: '订单中无该商家子单' };
+  } else {
+    return { error: 'INVALID_INPUT', message: '请提供 merchantId 或 subOrderId' };
+  }
+
+  const allowedOrder = ['PENDING_SHIPMENT', 'PAID', 'SHIPPED', 'COMPLETED', 'REFUNDING'].includes(order.status);
+  const allowedSub = ['PENDING_SHIPMENT', 'PAID', 'SHIPPED', 'COMPLETED', 'REFUNDING'].includes(sub.status);
+  // 产品要求：未发货即可联系；已发货也可继续沟通
+  if (!allowedOrder || !allowedSub) {
+    return { error: 'INVALID_STATE', message: '当前订单状态不可联系商家' };
+  }
+  if (['CANCELLED', 'REFUNDED'].includes(order.status) || ['CANCELLED', 'REFUNDED'].includes(sub.status)) {
+    return { error: 'INVALID_STATE', message: '当前订单状态不可联系商家' };
+  }
+
+  const existing = await chatRepo.findOpenThreadByOrderMerchant(order.orderId, merchantId, 'USER_MERCHANT');
+  if (existing) {
+    return { thread: await enrichThread(existing), created: false };
+  }
+
+  let thread;
+  try {
+    thread = await chatRepo.createThread({
+      afterSaleId: null,
+      orderId: order.orderId,
+      orderNo: order.orderNo,
+      userId: order.userId,
+      merchantId,
+      type: 'USER_MERCHANT',
+    });
+  } catch (err) {
+    const again = await chatRepo.findOpenThreadByOrderMerchant(order.orderId, merchantId, 'USER_MERCHANT');
+    if (again) return { thread: await enrichThread(again), created: false };
+    throw err;
+  }
+
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'TEXT',
+    content: `已接入与「${sub.shopName || '商家'}」的订单沟通，可咨询发货、规格颜色等问题。`,
+    payload: null,
+  });
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'CARD',
+    content: '订单卡片',
+    payload: buildOrderMerchantCardPayload(order, sub),
   });
 
   return { thread: await enrichThread(thread), created: true };
@@ -1661,11 +1768,17 @@ export async function postChatMessage(actor, threadId, body = {}) {
 
   if (msgType === 'TEXT') {
     if (!content) return { error: 'INVALID', message: '消息内容不能为空' };
-  } else {
+  } else if (thread.afterSaleId) {
     const item = await afterSaleRepo.findById(thread.afterSaleId);
     if (!item) return { error: 'NOT_FOUND', message: '关联售后不存在' };
     payload = payload || buildAfterSaleCardPayload(item);
     content = content || '售后订单卡片';
+  } else {
+    const order = await orderRepo.findById(thread.orderId);
+    const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
+    if (!order || !sub) return { error: 'NOT_FOUND', message: '关联订单不存在' };
+    payload = payload || buildOrderMerchantCardPayload(order, sub);
+    content = content || '订单卡片';
   }
 
   let senderType = 'USER';
@@ -1744,6 +1857,9 @@ export async function runMerchantChatAction(merchant, threadId, actionKey, body 
   if (!thread) return { error: 'NOT_FOUND', message: '会话不存在' };
   if (thread.type !== 'USER_MERCHANT') {
     return { error: 'INVALID', message: '该动作仅适用于商家会话' };
+  }
+  if (!thread.afterSaleId) {
+    return { error: 'INVALID', message: '订单沟通会话不支持售后快捷动作' };
   }
   const denied = await assertThreadAccess({ kind: 'merchant', merchant }, thread);
   if (denied) return denied;

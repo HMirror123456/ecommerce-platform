@@ -63,43 +63,45 @@
 
 ### 2.1 目标
 
-售后处于 `APPLIED`（商家处理中）时，用户与商家文字协商，减少误升级到平台。
+1. **售前/履约沟通**：订单已支付待发货（`PENDING_SHIPMENT`）时，用户可联系对应店铺商家（如改规格/颜色、催发货）。
+2. **售后协商**：售后处于 `APPLIED` 时，用户与商家文字协商，减少误升级到平台。
 
 ### 2.2 模型
 
 - `ChatThread.type = USER_MERCHANT`
-- 绑定 `afterSaleId`、`orderId` / `orderNo`、`userId`；响应中附带 `merchantId`、`shopName`（来自售后）
-- 同一 `afterSaleId` + `USER_MERCHANT` 至多一条 OPEN 会话（与 `USER_CS` 可并存）
+- **售后会话**：绑定 `afterSaleId` + `orderId` / `orderNo` + `userId` + `merchantId`
+- **订单会话**：`afterSaleId` 为空；绑定 `orderId` / `orderNo` + `userId` + `merchantId`（一单一店至多一条 OPEN）
 - 消息 `senderType`：`USER` / `MERCHANT` / `SYSTEM`
 
 ### 2.3 规则
 
 | 规则 | 说明 |
 |------|------|
-| 开聊 | 用户：`POST /after-sales/{id}/merchant-chat/thread` 幂等；商家亦可对本人售后调用同一接口取会话 |
-| 可聊状态 | 建议售后为 `APPLIED` 时可新建；已有 OPEN 会话可继续进入（只读/禁发由 `thread.status` 控制） |
-| 鉴权 | 用户仅本人；商家仅 `merchantId` 匹配的售后会话 |
+| 售后开聊 | `POST /after-sales/{id}/merchant-chat/thread`；建议 `APPLIED` 时可新建 |
+| 订单开聊 | `POST /orders/{orderId}/merchant-chat/thread`（body: `merchantId` 或 `subOrderId`）；订单属本人且目标子单/整单为待发货等可沟通状态 |
+| 鉴权 | 用户仅本人；商家仅本店 `merchantId` 匹配的会话 |
 | 传输 | 与 USER_CS 相同：HTTP + `afterId` 轮询 |
-| 卡片 | 同 USER_CS，`msgType=CARD` |
-| 商家快捷 | `MERCHANT_APPROVE` / `MERCHANT_REJECT` → 已有 `POST /merchant/after-sales/{id}/audit`，并写 SYSTEM 消息 |
-| 用户升级 | 用户侧提供「仍要申请平台介入」→ 已有 escalate；成功后可再开 `USER_CS` |
+| 卡片 | 售后会话发卡含售后摘要；订单会话发卡含订单/店铺摘要 |
+| 商家快捷 | 仅**售后会话**：`MERCHANT_APPROVE` / `MERCHANT_REJECT` → audit API |
+| 用户升级 | 售后会话可「仍要申请平台介入」→ escalate |
 
 ### 2.4 API 摘要
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/after-sales/{afterSaleId}/merchant-chat/thread` | 开聊/取已有 USER_MERCHANT |
-| GET | `/chat/threads?type=USER_MERCHANT` | 会话列表（用户见自己的；商家见本店） |
-| GET/POST | `/chat/threads/{id}/messages` | 拉/发消息（用户或对应商家） |
-| POST | `/chat/threads/{id}/actions/{actionKey}` | 商家：`MERCHANT_APPROVE` / `MERCHANT_REJECT` |
+| POST | `/after-sales/{afterSaleId}/merchant-chat/thread` | 售后商家会话 |
+| POST | `/orders/{orderId}/merchant-chat/thread` | 订单商家会话（未发货沟通） |
+| GET | `/chat/threads?type=USER_MERCHANT` | 会话列表 |
+| GET/POST | `/chat/threads/{id}/messages` | 拉/发消息 |
+| POST | `/chat/threads/{id}/actions/{actionKey}` | 商家售后快捷动作 |
 
 ### 2.5 前端入口
 
 | 端 | 入口 | 负责人 |
 |----|------|--------|
-| web-user | 订单详情售后区「联系商家」抽屉；可「仍要申请平台介入」 | 成员 A |
-| web-merchant | 售后列表/详情「回复用户」；快捷同意/拒绝 | 成员 B |
+| web-user | 订单详情「履约信息」待发货店铺旁「联系商家」；售后区「联系商家」 | 成员 A |
+| web-merchant | 会话列表/售后详情「回复用户」 | 成员 B |
 
 ### 2.6 非目标
 
-不做 WebSocket、已读回执、图片、用户↔商家↔平台三方同房。
+不做 WebSocket、已读回执、图片、用户↔商家↔平台三方同房；不做真实改 SKU 下单回写（仅沟通，改色等由商家线下/后台处理）。

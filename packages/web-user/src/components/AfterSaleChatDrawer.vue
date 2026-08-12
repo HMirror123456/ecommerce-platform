@@ -2,7 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { fetchChatMessages, openAfterSaleChat, openMerchantChat, sendChatMessage } from '@/api/chat';
+import { fetchChatMessages, openAfterSaleChat, openMerchantChat, openOrderMerchantChat, sendChatMessage } from '@/api/chat';
 
 const AFTER_SALE_STATUS_LABELS = {
   APPLIED: '待商家处理',
@@ -18,12 +18,25 @@ const AFTER_SALE_TYPE_LABELS = {
   RETURN_REFUND: '退货退款',
 };
 
+const ORDER_STATUS_LABELS = {
+  PENDING_PAYMENT: '待支付',
+  PENDING_SHIPMENT: '待发货',
+  SHIPPED: '已发货',
+  COMPLETED: '已完成',
+  CANCELLED: '已取消',
+  REFUNDING: '退款中',
+  REFUNDED: '已退款',
+};
+
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   afterSaleId: { type: Number, default: null },
+  /** 订单级联系商家时使用 */
+  orderId: { type: Number, default: null },
+  merchantId: { type: Number, default: null },
   /** USER_CS | USER_MERCHANT */
   threadType: { type: String, default: 'USER_CS' },
-  /** 商家会话中展示「申请平台介入」 */
+  /** 商家售后会话中展示「申请平台介入」 */
   canEscalate: { type: Boolean, default: false },
 });
 const emit = defineEmits(['update:modelValue', 'escalate']);
@@ -38,14 +51,18 @@ const sending = ref(false);
 let pollTimer = null;
 
 const isMerchantChat = computed(() => props.threadType === 'USER_MERCHANT');
+const isOrderMerchantChat = computed(
+  () => isMerchantChat.value && !props.afterSaleId && props.orderId && props.merchantId,
+);
 const drawerTitle = computed(() => (isMerchantChat.value ? '联系商家' : '平台客服'));
 const threadOpen = computed(() => thread.value?.status === 'OPEN');
 const showEmpty = computed(() => !loading.value && !openError.value && thread.value && messages.value.length === 0);
 
 const threadStatusLabel = computed(() => {
-  const status = thread.value?.afterSaleStatus;
-  if (!status) return '';
-  return AFTER_SALE_STATUS_LABELS[status] || status;
+  if (thread.value?.afterSaleStatus) {
+    return AFTER_SALE_STATUS_LABELS[thread.value.afterSaleStatus] || thread.value.afterSaleStatus;
+  }
+  return '';
 });
 
 function formatTime(iso) {
@@ -63,7 +80,7 @@ function typeLabel(type) {
 }
 
 function statusLabel(status) {
-  return AFTER_SALE_STATUS_LABELS[status] || status || '-';
+  return AFTER_SALE_STATUS_LABELS[status] || ORDER_STATUS_LABELS[status] || status || '-';
 }
 
 function senderLabel(msg) {
@@ -98,25 +115,35 @@ async function loadMessages(reset) {
 }
 
 async function openThread() {
-  if (!props.afterSaleId) {
+  const needAfterSale = props.threadType === 'USER_CS' || (isMerchantChat.value && props.afterSaleId);
+  if (needAfterSale && !props.afterSaleId) {
     openError.value = isMerchantChat.value
       ? '缺少售后单信息，无法联系商家'
       : '缺少售后单信息，无法打开客服会话';
     return;
   }
+  if (isOrderMerchantChat.value && (!props.orderId || !props.merchantId)) {
+    openError.value = '缺少订单或商家信息，无法联系商家';
+    return;
+  }
+
   loading.value = true;
   openError.value = '';
   try {
-    thread.value = isMerchantChat.value
-      ? await openMerchantChat(props.afterSaleId)
-      : await openAfterSaleChat(props.afterSaleId);
+    if (props.threadType === 'USER_CS') {
+      thread.value = await openAfterSaleChat(props.afterSaleId);
+    } else if (props.afterSaleId) {
+      thread.value = await openMerchantChat(props.afterSaleId);
+    } else {
+      thread.value = await openOrderMerchantChat(props.orderId, { merchantId: props.merchantId });
+    }
     await loadMessages(true);
     startPoll();
   } catch (e) {
     openError.value =
       e.message ||
       (isMerchantChat.value
-        ? '无法打开商家会话，请确认售后仍待商家处理'
+        ? '无法打开商家会话，请稍后重试'
         : '无法打开客服会话，请确认已申请平台介入后重试');
     thread.value = null;
     messages.value = [];
@@ -257,19 +284,22 @@ onUnmounted(stopPoll);
                   <span class="label">店铺</span>
                   <span>{{ m.payload?.shopName || '-' }}</span>
                 </div>
-                <div class="card-row">
-                  <span class="label">类型</span>
-                  <span>{{ typeLabel(m.payload?.type) }}</span>
-                </div>
-                <div class="card-row">
-                  <span class="label">状态</span>
-                  <span>{{ statusLabel(m.payload?.status) }}</span>
-                </div>
-                <div class="card-row">
-                  <span class="label">金额</span>
-                  <span class="amount">{{ formatPrice(m.payload?.amount) }}</span>
-                </div>
-                <div v-if="m.payload?.reason" class="card-reason">原因：{{ m.payload.reason }}</div>
+              <div class="card-row">
+                <span class="label">类型</span>
+                <span>{{ m.payload?.type ? typeLabel(m.payload.type) : '订单沟通' }}</span>
+              </div>
+              <div class="card-row">
+                <span class="label">状态</span>
+                <span>{{ statusLabel(m.payload?.status || m.payload?.orderStatus || m.payload?.subOrderStatus) }}</span>
+              </div>
+              <div class="card-row">
+                <span class="label">金额</span>
+                <span class="amount">{{ formatPrice(m.payload?.amount) }}</span>
+              </div>
+              <div v-if="m.payload?.itemTitles?.length" class="card-reason">
+                商品：{{ m.payload.itemTitles.join('、') }}
+              </div>
+              <div v-if="m.payload?.reason" class="card-reason">原因：{{ m.payload.reason }}</div>
               </button>
               <div v-else class="text">{{ m.content }}</div>
             </div>
@@ -278,7 +308,7 @@ onUnmounted(stopPoll);
 
         <div class="composer">
           <p v-if="thread && !threadOpen" class="closed-tip">会话已关闭，无法继续发送</p>
-          <div v-if="isMerchantChat && canEscalate" class="escalate-row">
+          <div v-if="isMerchantChat && canEscalate && afterSaleId" class="escalate-row">
             <el-button type="warning" plain size="small" @click="emit('escalate')">
               仍要申请平台介入
             </el-button>

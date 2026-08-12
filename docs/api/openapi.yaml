@@ -1670,7 +1670,7 @@ paths:
   /after-sales/{afterSaleId}/merchant-chat/thread:
     post:
       tags: [chat]
-      summary: 开聊或获取已有 USER_MERCHANT 会话（幂等）
+      summary: 开聊或获取已有售后 USER_MERCHANT 会话（幂等）
       description: |
         用户对本人售后开聊；商家对本店售后开聊/取会话。
         建议售后状态为 APPLIED 时新建；已有 OPEN 会话可直接返回。
@@ -1701,6 +1701,53 @@ paths:
           description: 售后不存在
         '409':
           description: 当前售后状态不允许新建商家会话
+
+  /orders/{orderId}/merchant-chat/thread:
+    post:
+      tags: [chat]
+      summary: 开聊或获取订单级 USER_MERCHANT 会话（幂等）
+      description: |
+        用于待发货等履约前沟通（改规格/颜色、催发货等）。
+        请求体传 merchantId 或 subOrderId；同一 orderId+merchantId 至多一条 OPEN。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                merchantId:
+                  type: integer
+                subOrderId:
+                  type: integer
+              description: merchantId 与 subOrderId 至少传一个
+      responses:
+        '200':
+          description: 已有会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '201':
+          description: 新建会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 非本人订单或非目标店铺
+        '404':
+          description: 订单/子单不存在
+        '409':
+          description: 当前订单状态不允许联系商家
 
   /chat/threads:
     get:
@@ -1852,6 +1899,8 @@ components:
           enum: [USER_CS, USER_MERCHANT]
         afterSaleId:
           type: integer
+          nullable: true
+          description: 售后会话必填；订单级沟通可空
         orderId:
           type: integer
         orderNo:
@@ -1861,7 +1910,7 @@ components:
         merchantId:
           type: integer
           nullable: true
-          description: USER_MERCHANT 时来自售后；USER_CS 可空
+          description: USER_MERCHANT 时必有；USER_CS 可空
         shopName:
           type: string
           nullable: true

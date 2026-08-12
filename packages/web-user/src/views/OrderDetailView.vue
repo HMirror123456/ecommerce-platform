@@ -59,6 +59,8 @@ const returnForm = ref({
 
 const chatVisible = ref(false);
 const chatAfterSaleId = ref(null);
+const chatOrderId = ref(null);
+const chatMerchantId = ref(null);
 const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
 const merchantChatTarget = ref(null);
@@ -162,9 +164,16 @@ function canContactCs(afterSale) {
   return afterSale?.status === 'ESCALATED';
 }
 
-/** 领域规则：USER_MERCHANT，售后待商家处理时可协商 */
+/** 领域规则：USER_MERCHANT 售后协商，售后待商家处理时可聊 */
 function canContactMerchant(afterSale) {
   return afterSale?.status === 'APPLIED';
+}
+
+/** 履约前/履约中：按子单联系店铺（未发货改色等） */
+function canContactShop(sub) {
+  if (!order.value || !sub) return false;
+  if (['CANCELLED', 'REFUNDED'].includes(order.value.status)) return false;
+  return ['PENDING_SHIPMENT', 'PAID', 'SHIPPED', 'COMPLETED', 'REFUNDING'].includes(sub.status);
 }
 
 function openCsChat(afterSale) {
@@ -172,6 +181,8 @@ function openCsChat(afterSale) {
   chatCanEscalate.value = false;
   merchantChatTarget.value = null;
   chatAfterSaleId.value = afterSale.afterSaleId;
+  chatOrderId.value = null;
+  chatMerchantId.value = null;
   chatVisible.value = true;
 }
 
@@ -180,6 +191,18 @@ function openMerchantChatDrawer(afterSale) {
   chatCanEscalate.value = canEscalate(afterSale);
   merchantChatTarget.value = afterSale;
   chatAfterSaleId.value = afterSale.afterSaleId;
+  chatOrderId.value = null;
+  chatMerchantId.value = null;
+  chatVisible.value = true;
+}
+
+function openShopChat(sub) {
+  chatThreadType.value = 'USER_MERCHANT';
+  chatCanEscalate.value = false;
+  merchantChatTarget.value = null;
+  chatAfterSaleId.value = null;
+  chatOrderId.value = order.value.orderId;
+  chatMerchantId.value = sub.merchantId;
   chatVisible.value = true;
 }
 
@@ -267,10 +290,21 @@ onMounted(loadOrder);
       <el-card v-if="order.subOrders?.length" shadow="never" class="section-card">
         <template #header><span>履约信息</span></template>
         <div v-for="sub in order.subOrders" :key="sub.subOrderId" class="sub-block">
-          <p class="line">
-            <strong>{{ sub.shopName }}</strong>
-            · {{ ORDER_STATUS_LABELS[sub.status] || sub.status }}
-          </p>
+          <div class="sub-row">
+            <p class="line">
+              <strong>{{ sub.shopName }}</strong>
+              · {{ ORDER_STATUS_LABELS[sub.status] || sub.status }}
+            </p>
+            <el-button
+              v-if="canContactShop(sub)"
+              type="primary"
+              plain
+              size="small"
+              @click="openShopChat(sub)"
+            >
+              联系商家
+            </el-button>
+          </div>
           <p v-if="sub.shipment" class="line muted">
             {{ sub.shipment.logisticsCompany }} {{ sub.shipment.trackingNo }}
             · 发货于 {{ formatTime(sub.shipment.shippedAt) }}
@@ -410,6 +444,8 @@ onMounted(loadOrder);
     <AfterSaleChatDrawer
       v-model="chatVisible"
       :after-sale-id="chatAfterSaleId"
+      :order-id="chatOrderId"
+      :merchant-id="chatMerchantId"
       :thread-type="chatThreadType"
       :can-escalate="chatCanEscalate"
       @escalate="onEscalateFromChat"
@@ -448,6 +484,14 @@ onMounted(loadOrder);
 .muted { color: var(--text-muted); font-size: 13px; }
 .sub-block { padding: 8px 0; border-bottom: 1px solid var(--border-color); }
 .sub-block:last-child { border-bottom: none; }
+.sub-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sub-row .line { margin-bottom: 0; }
 .after-sale-row {
   display: flex;
   align-items: flex-start;

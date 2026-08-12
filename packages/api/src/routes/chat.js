@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   ensureUserCsThread,
   ensureUserMerchantThread,
+  ensureOrderMerchantThread,
   getChatMessages,
   listChatThreads,
   postChatMessage,
@@ -58,6 +59,20 @@ router.post(
     }
   },
 );
+
+router.post('/orders/:orderId/merchant-chat/thread', requireUser, async (req, res, next) => {
+  try {
+    const result = await ensureOrderMerchantThread(req.user.id, Number(req.params.orderId), req.body || {});
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    if (result.error === 'INVALID_INPUT') return res.status(400).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.status(result.created ? 201 : 200).json(result.thread);
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/chat/threads', requireUserMerchantOrCs, async (req, res, next) => {
   try {

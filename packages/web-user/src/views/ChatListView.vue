@@ -32,6 +32,7 @@ const typeFilter = ref('ALL');
 const chatVisible = ref(false);
 const chatAfterSaleId = ref(null);
 const chatOrderId = ref(null);
+const chatMerchantId = ref(null);
 const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
 
@@ -73,16 +74,22 @@ async function loadThreads() {
 }
 
 function openChat(row) {
-  if (!row?.afterSaleId) {
+  if (row.type === 'USER_CS' && !row.afterSaleId) {
     ElMessage.warning('该会话缺少售后信息');
+    return;
+  }
+  if (row.type === 'USER_MERCHANT' && !row.afterSaleId && (!row.orderId || !row.merchantId)) {
+    ElMessage.warning('该会话缺少订单或商家信息');
     return;
   }
   chatThreadType.value = row.type === 'USER_MERCHANT' ? 'USER_MERCHANT' : 'USER_CS';
   chatCanEscalate.value =
     row.type === 'USER_MERCHANT' &&
+    Boolean(row.afterSaleId) &&
     (row.afterSaleStatus === 'APPLIED' || row.afterSaleStatus === 'REJECTED');
-  chatAfterSaleId.value = row.afterSaleId;
+  chatAfterSaleId.value = row.afterSaleId || null;
   chatOrderId.value = row.orderId || null;
+  chatMerchantId.value = row.afterSaleId ? null : row.merchantId || null;
   chatVisible.value = true;
 }
 
@@ -127,7 +134,7 @@ onMounted(loadThreads);
 
     <el-empty
       v-if="!loading && threads.length === 0"
-      description="暂无会话。可在订单详情「联系商家」或申请平台介入后联系客服"
+      description="暂无会话。待发货订单可在详情「联系商家」；售后也可联系商家或申请平台介入"
     >
       <el-button type="primary" @click="router.push({ name: 'user-orders' })">去我的订单</el-button>
     </el-empty>
@@ -166,6 +173,8 @@ onMounted(loadThreads);
     <AfterSaleChatDrawer
       v-model="chatVisible"
       :after-sale-id="chatAfterSaleId"
+      :order-id="chatAfterSaleId ? null : chatOrderId"
+      :merchant-id="chatMerchantId"
       :thread-type="chatThreadType"
       :can-escalate="chatCanEscalate"
       @escalate="onEscalateFromList"
