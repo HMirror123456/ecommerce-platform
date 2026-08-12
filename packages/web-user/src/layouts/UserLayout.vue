@@ -33,7 +33,7 @@ function onLogout() {
     <el-main class="main">
       <h1 v-if="route.name === 'cart'" class="layout-page-title">购物车</h1>
       <p
-        v-else-if="pageTitle && !['products', 'product-detail', 'profile', 'user-orders', 'user-favorites', 'user-addresses'].includes(route.name)"
+        v-else-if="pageTitle && !['products', 'product-detail', 'profile', 'user-orders', 'user-favorites', 'user-addresses', 'user-chats'].includes(route.name)"
         class="page-breadcrumb"
       >
         {{ pageTitle }}

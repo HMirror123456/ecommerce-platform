@@ -154,8 +154,9 @@ function canEscalate(afterSale) {
   return afterSale.status === 'APPLIED' || afterSale.status === 'REJECTED';
 }
 
+/** 领域规则：平台客服会话挂在售后升级后（USER_CS）；仅仲裁中展示入口 */
 function canContactCs(afterSale) {
-  return afterSale && afterSale.status !== 'REFUNDED';
+  return afterSale?.status === 'ESCALATED';
 }
 
 function openCsChat(afterSale) {

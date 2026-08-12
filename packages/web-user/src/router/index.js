@@ -75,6 +75,12 @@ const router = createRouter({
               component: () => import('@/views/AddressListView.vue'),
               meta: { title: '收货地址' },
             },
+            {
+              path: 'chats',
+              name: 'user-chats',
+              component: () => import('@/views/ChatListView.vue'),
+              meta: { title: '我的客服会话' },
+            },
           ],
         },
         // 兼容旧路径
