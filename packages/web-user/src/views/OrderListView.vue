@@ -1,8 +1,8 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { fetchOrders } from '@/api/order';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { confirmReceipt, fetchOrders } from '@/api/order';
 
 const STATUS_OPTIONS = [
   { label: '全部', value: '' },
@@ -54,6 +54,18 @@ function goPay(orderId) {
   router.push({ name: 'payment', params: { orderId } });
 }
 
+/** 领域：SHIPPED → COMPLETED */
+async function onConfirmReceipt(orderId) {
+  try {
+    await ElMessageBox.confirm('确认已收到商品？确认后订单将完成。', '确认收货', { type: 'info' });
+    await confirmReceipt(orderId);
+    ElMessage.success('确认收货成功，订单已完成');
+    await loadOrders();
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '确认收货失败');
+  }
+}
+
 onMounted(loadOrders);
 </script>
 
@@ -99,6 +111,13 @@ onMounted(loadOrders);
               @click="goPay(order.orderId)"
             >
               去支付
+            </el-button>
+            <el-button
+              v-if="order.status === 'SHIPPED'"
+              type="primary"
+              @click="onConfirmReceipt(order.orderId)"
+            >
+              确认收货
             </el-button>
             <el-button @click="goDetail(order.orderId)">查看详情</el-button>
           </div>

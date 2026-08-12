@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   applyAfterSale,
   cancelOrder,
+  confirmReceipt,
   escalateAfterSale,
   fetchOrder,
   submitAfterSaleReturn,
@@ -47,6 +48,7 @@ const form = ref({
   type: 'REFUND_ONLY',
   reason: '',
   subOrderId: null,
+  selectedSkuIds: [],
 });
 
 const returnDialogVisible = ref(false);
@@ -65,16 +67,61 @@ const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
 const merchantChatTarget = ref(null);
 
-const canApplyAfterSale = computed(() => {
-  if (!order.value) return false;
-  if (!['SHIPPED', 'COMPLETED'].includes(order.value.status)) return false;
-  const list = order.value.afterSales || [];
-  return !list.some((a) => ['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING'].includes(a.status));
+const OCCUPIED_AFTER_SALE = new Set(['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING', 'REFUNDED']);
+
+const occupiedQtyBySku = computed(() => {
+  const map = new Map();
+  for (const as of order.value?.afterSales || []) {
+    if (!OCCUPIED_AFTER_SALE.has(as.status)) continue;
+    for (const line of as.items || []) {
+      const skuId = Number(line.skuId);
+      const qty = Number(line.quantity) || 0;
+      map.set(skuId, (map.get(skuId) || 0) + qty);
+    }
+  }
+  return map;
 });
 
 const shippableSubOrders = computed(() =>
   (order.value?.subOrders || []).filter((s) => ['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(s.status)),
 );
+
+/** 各子单剩余可售后商品（整件） */
+const remainingBySubOrderId = computed(() => {
+  const result = new Map();
+  for (const sub of shippableSubOrders.value) {
+    const lines = (sub.items || [])
+      .map((line) => {
+        const skuId = Number(line.skuId);
+        const ordered = Number(line.quantity) || 0;
+        const remaining = Math.max(0, ordered - (occupiedQtyBySku.value.get(skuId) || 0));
+        return {
+          skuId,
+          title: line.title,
+          price: line.price,
+          quantity: remaining,
+          orderedQuantity: ordered,
+        };
+      })
+      .filter((line) => line.quantity > 0);
+    result.set(sub.subOrderId, lines);
+  }
+  return result;
+});
+
+const selectableItems = computed(() => {
+  if (!form.value.subOrderId) return [];
+  return remainingBySubOrderId.value.get(form.value.subOrderId) || [];
+});
+
+const canApplyAfterSale = computed(() => {
+  if (!order.value) return false;
+  if (!['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(order.value.status)) return false;
+  for (const lines of remainingBySubOrderId.value.values()) {
+    if (lines.length) return true;
+  }
+  return false;
+});
 
 function formatPrice(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
@@ -83,6 +130,12 @@ function formatPrice(value) {
 function formatTime(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN');
+}
+
+function formatAfterSaleItems(as) {
+  const list = as?.items || [];
+  if (!list.length) return '全部商品';
+  return list.map((it) => `${it.title || `SKU${it.skuId}`}×${it.quantity}`).join('、');
 }
 
 async function loadOrder() {
@@ -110,13 +163,35 @@ async function onCancel() {
   }
 }
 
+/** 领域：SHIPPED → COMPLETED */
+async function onConfirmReceipt() {
+  try {
+    await ElMessageBox.confirm('确认已收到商品？确认后订单将完成。', '确认收货', { type: 'info' });
+    await confirmReceipt(orderId.value);
+    ElMessage.success('确认收货成功，订单已完成');
+    await loadOrder();
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '确认收货失败');
+  }
+}
+
 function openAfterSale() {
+  const firstSub =
+    shippableSubOrders.value.find((s) => (remainingBySubOrderId.value.get(s.subOrderId) || []).length) ||
+    shippableSubOrders.value[0];
+  const remain = firstSub ? remainingBySubOrderId.value.get(firstSub.subOrderId) || [] : [];
   form.value = {
     type: 'REFUND_ONLY',
     reason: '',
-    subOrderId: shippableSubOrders.value[0]?.subOrderId ?? null,
+    subOrderId: firstSub?.subOrderId ?? null,
+    selectedSkuIds: remain.map((r) => r.skuId),
   };
   dialogVisible.value = true;
+}
+
+function onSubOrderChange() {
+  const remain = selectableItems.value;
+  form.value.selectedSkuIds = remain.map((r) => r.skuId);
 }
 
 async function onSubmitAfterSale() {
@@ -124,12 +199,27 @@ async function onSubmitAfterSale() {
     ElMessage.warning('请填写售后原因');
     return;
   }
+  if (!form.value.selectedSkuIds?.length) {
+    ElMessage.warning('请选择要售后的商品');
+    return;
+  }
+  const remainMap = new Map(selectableItems.value.map((r) => [r.skuId, r]));
+  const items = form.value.selectedSkuIds
+    .map((skuId) => remainMap.get(skuId))
+    .filter(Boolean)
+    .map((r) => ({ skuId: r.skuId, quantity: r.quantity }));
+  if (!items.length) {
+    ElMessage.warning('所选商品已无可售后数量');
+    return;
+  }
+
   submitting.value = true;
   try {
     await applyAfterSale(orderId.value, {
       type: form.value.type,
       reason: form.value.reason.trim(),
       subOrderId: form.value.subOrderId || undefined,
+      items,
     });
     ElMessage.success('售后申请已提交');
     dialogVisible.value = false;
@@ -333,6 +423,7 @@ onMounted(loadOrder);
               <span class="as-type">{{ as.type === 'RETURN_REFUND' ? '退货退款' : '仅退款' }}</span>
             </p>
             <p class="line muted">原因：{{ as.reason }}</p>
+            <p class="line muted">商品：{{ formatAfterSaleItems(as) }}</p>
             <p v-if="as.auditReason" class="line muted">处理说明：{{ as.auditReason }}</p>
             <p
               v-if="as.returnShipment"
@@ -396,25 +487,47 @@ onMounted(loadOrder);
         >
           去支付
         </el-button>
+        <el-button
+          v-if="order.status === 'SHIPPED'"
+          type="primary"
+          @click="onConfirmReceipt"
+        >
+          确认收货
+        </el-button>
       </div>
     </template>
 
-    <el-dialog v-model="dialogVisible" title="申请售后" width="480px">
+    <el-dialog v-model="dialogVisible" title="申请售后" width="520px">
       <el-form label-position="top">
         <el-form-item label="售后类型" required>
           <el-radio-group v-model="form.type">
             <el-radio v-for="t in AFTER_SALE_TYPES" :key="t.value" :label="t.value">{{ t.label }}</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="shippableSubOrders.length > 1" label="子订单">
-          <el-select v-model="form.subOrderId" style="width: 100%">
+        <el-form-item v-if="shippableSubOrders.length > 1" label="子订单 / 店铺" required>
+          <el-select v-model="form.subOrderId" style="width: 100%" @change="onSubOrderChange">
             <el-option
               v-for="sub in shippableSubOrders"
               :key="sub.subOrderId"
-              :label="`${sub.shopName}（#${sub.subOrderId}）`"
+              :label="`${sub.shopName}（可售后 ${(remainingBySubOrderId.get(sub.subOrderId) || []).length} 种）`"
               :value="sub.subOrderId"
+              :disabled="!(remainingBySubOrderId.get(sub.subOrderId) || []).length"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item label="选择商品（整件售后）" required>
+          <el-checkbox-group v-if="selectableItems.length" v-model="form.selectedSkuIds" class="sku-check-group">
+            <el-checkbox
+              v-for="item in selectableItems"
+              :key="item.skuId"
+              :label="item.skuId"
+              class="sku-check"
+            >
+              <span class="sku-title">{{ item.title }}</span>
+              <span class="sku-meta">×{{ item.quantity }} · {{ formatPrice(item.price) }}</span>
+            </el-checkbox>
+          </el-checkbox-group>
+          <p v-else class="muted">该子单暂无可申请售后的商品</p>
         </el-form-item>
         <el-form-item label="申请原因" required>
           <el-input v-model="form.reason" type="textarea" :rows="3" maxlength="200" show-word-limit />
@@ -503,6 +616,19 @@ onMounted(loadOrder);
 .after-sale-row:last-child { border-bottom: none; }
 .as-type { margin-left: 8px; font-weight: 600; }
 .as-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.sku-check-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.sku-check {
+  margin-right: 0;
+  height: auto;
+  white-space: normal;
+}
+.sku-title { display: block; font-weight: 500; }
+.sku-meta { display: block; font-size: 12px; color: var(--text-muted); }
 .actions {
   display: flex;
   justify-content: flex-end;

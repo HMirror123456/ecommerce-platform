@@ -677,10 +677,37 @@ paths:
         '200':
           description: OK
 
+  /orders/{orderId}/confirm-receipt:
+    post:
+      tags: [order]
+      summary: 确认收货
+      description: |
+        用户确认收货。仅已发货（SHIPPED）订单可操作。
+        主单与仍为 SHIPPED 的子单状态变为 COMPLETED（领域：SHIPPED → COMPLETED）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 确认成功，返回更新后的订单
+        '404':
+          description: 订单不存在
+        '409':
+          description: 订单状态不允许确认收货
+
   /orders/{orderId}/after-sales:
     post:
       tags: [order]
-      summary: 用户申请售后
+      summary: 用户申请售后（按 SKU，支持一单多笔）
+      description: |
+        选择同一子单下的一个或多个 SKU 申请售后。
+        每个 SKU 的 quantity 须为剩余可售后整件数量。
+        同一订单可多次申请，只要 SKU 仍有剩余可售后数量。
       security:
         - bearerAuth: []
       parameters:
@@ -702,6 +729,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AfterSale'
+        '400':
+          description: 参数无效或数量不合法
+        '409':
+          description: 状态不允许或 SKU 可售后数量不足
 
   /orders/{orderId}/after-sales/{afterSaleId}/escalate:
     post:
@@ -2326,7 +2357,7 @@ components:
 
     CreateAfterSaleRequest:
       type: object
-      required: [type, reason]
+      required: [type, reason, items]
       properties:
         type:
           $ref: '#/components/schemas/AfterSaleType'
@@ -2334,6 +2365,22 @@ components:
           type: string
         subOrderId:
           type: integer
+          description: 可选；多店铺订单时指定子单。省略则按 items 所属子单推断（items 须同属一个子单）
+        items:
+          type: array
+          minItems: 1
+          description: |
+            本次售后的商品行。skuId 须属于目标子单；
+            本迭代 quantity 须等于该 SKU 剩余可售后数量（整件售后）。
+          items:
+            type: object
+            required: [skuId, quantity]
+            properties:
+              skuId:
+                type: integer
+              quantity:
+                type: integer
+                minimum: 1
 
     AfterSaleAuditRequest:
       type: object

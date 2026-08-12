@@ -94,8 +94,14 @@ erDiagram
 - **属性**：`id`, `subOrderId`, `logisticsCompany`, `trackingNo`, `shippedAt`
 
 #### AfterSale（售后）
-- **属性**：`id`, `orderId`, `subOrderId`, `userId`, `type`（`REFUND_ONLY`/`RETURN_REFUND`）, `reason`, `status`, `appliedAt`, `merchantDeadline`
-- **不变式**：仅 `SHIPPED`/`COMPLETED` 订单可申请（P1 简化为已发货）
+- **属性**：`id`, `orderId`, `subOrderId`, `userId`, `merchantId`, `type`（`REFUND_ONLY`/`RETURN_REFUND`）, `reason`, `status`, `appliedAt`, `merchantDeadline`, `items`（售后商品行：`skuId`/`title`/`price`/`quantity`）
+- **不变式**：
+  - 仅 `SHIPPED`/`COMPLETED` 订单可申请
+  - **按 SKU 申请**：一次售后可包含同一子单下若干 SKU；本迭代为「整件」——每个 SKU 的申请数量须等于该 SKU 剩余可售后数量（下单量 − 非 `REJECTED` 售后占用）
+  - **一单多笔**：同一订单允许并存多笔售后，只要 SKU 剩余可售后数量足够；禁止对已被占用的数量重复申请
+  - 子单/主单进入 `REFUNDING`：存在进行中售后（`APPLIED`/`ESCALATED`/`APPROVED`/`RETURNING`）时
+  - 主单 `REFUNDED`：仅当该订单全部商品数量均已进入售后终态 `REFUNDED` 时
+  - 售后拒绝：若订单上无其它进行中售后，主单/子单退出 `REFUNDING` 恢复 `SHIPPED`（或保持已完成语境下的可售后状态，实现上恢复 `SHIPPED`）
 
 #### Admin（平台管理员）
 - **属性**：`id`, `username`, `passwordHash`, `role`（`SUPER_ADMIN`/`OPERATOR`/`CS_AGENT`）, `status`（`ACTIVE`/`DISABLED`）, `createdAt`

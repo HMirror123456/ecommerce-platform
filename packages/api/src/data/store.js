@@ -301,9 +301,72 @@ export async function escalateOverdueAfterSales() {
   return afterSaleRepo.escalateOverdue(new Date());
 }
 
+/** 进行中 + 已退款 占用可售后数量；REJECTED 不占用 */
+const AFTER_SALE_QTY_OCCUPIED = new Set(['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING', 'REFUNDED']);
+const AFTER_SALE_IN_PROGRESS = new Set(['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING']);
+
+function getOccupiedQtyBySku(afterSales) {
+  const map = new Map();
+  for (const as of afterSales || []) {
+    if (!AFTER_SALE_QTY_OCCUPIED.has(as.status)) continue;
+    for (const line of as.items || []) {
+      const skuId = Number(line.skuId);
+      const qty = Number(line.quantity) || 0;
+      if (!Number.isInteger(skuId) || skuId <= 0 || qty <= 0) continue;
+      map.set(skuId, (map.get(skuId) || 0) + qty);
+    }
+  }
+  return map;
+}
+
+function buildRemainingItemsForSub(sub, occupiedBySku) {
+  return (sub.items || [])
+    .map((line) => {
+      const skuId = Number(line.skuId);
+      const ordered = Number(line.quantity) || 0;
+      const occupied = occupiedBySku.get(skuId) || 0;
+      const remaining = Math.max(0, ordered - occupied);
+      return {
+        skuId,
+        title: line.title,
+        price: line.price,
+        quantity: remaining,
+        orderedQuantity: ordered,
+      };
+    })
+    .filter((line) => line.quantity > 0);
+}
+
+async function orderHasInProgressAfterSale(orderId, excludeAfterSaleId = null) {
+  const list = await afterSaleRepo.listByOrderId(orderId);
+  return list.some(
+    (a) =>
+      a.afterSaleId !== excludeAfterSaleId && AFTER_SALE_IN_PROGRESS.has(a.status),
+  );
+}
+
+async function isOrderFullyRefundedByAfterSales(order) {
+  const list = await afterSaleRepo.listByOrderId(order.orderId);
+  const refundedQty = new Map();
+  for (const as of list) {
+    if (as.status !== 'REFUNDED') continue;
+    for (const line of as.items || []) {
+      const skuId = Number(line.skuId);
+      const qty = Number(line.quantity) || 0;
+      refundedQty.set(skuId, (refundedQty.get(skuId) || 0) + qty);
+    }
+  }
+  for (const line of order.items || []) {
+    const skuId = Number(line.skuId);
+    const ordered = Number(line.quantity) || 0;
+    if ((refundedQty.get(skuId) || 0) < ordered) return false;
+  }
+  return (order.items || []).length > 0;
+}
+
 /**
- * 领域规则：同意售后收尾 → REFUNDED；
- * AfterSaleRefunded：订单 REFUNDED，库存 available += quantity
+ * 领域规则：同意售后收尾 → 本售后 REFUNDED；
+ * 仅当订单全部商品均已 REFUNDED 时主单/子单 → REFUNDED；库存按本售后 items 回滚
  */
 async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
   for (const line of item.items || []) {
@@ -313,7 +376,6 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
     if (!Number.isInteger(quantity) || quantity <= 0) continue;
     const restored = await stockRepo.restoreAvailable(skuId, quantity);
     if (restored.error === 'SKU_NOT_FOUND') {
-      // Demo seed 售后可能指向未入库 SKU；跳过以保证仲裁可完成
       continue;
     }
     if (restored.error) return restored;
@@ -324,10 +386,26 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
     auditReason,
     auditedAt: new Date(),
   });
-  await orderRepo.updateOrder(item.orderId, { status: 'REFUNDED' });
-  if (item.subOrderId) {
-    await orderRepo.updateSubOrderStatus(item.subOrderId, 'REFUNDED');
+
+  const order = await orderRepo.findById(item.orderId);
+  if (order && (await isOrderFullyRefundedByAfterSales(order))) {
+    await orderRepo.updateOrder(item.orderId, { status: 'REFUNDED' });
+    for (const sub of order.subOrders || []) {
+      await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDED');
+    }
+  } else if (order && !(await orderHasInProgressAfterSale(item.orderId, item.afterSaleId))) {
+    // 部分退款完成且无进行中售后：退出 REFUNDING
+    if (order.status === 'REFUNDING') {
+      await orderRepo.updateOrder(item.orderId, { status: 'SHIPPED' });
+    }
+    if (item.subOrderId) {
+      const sub = order.subOrders?.find((s) => s.subOrderId === item.subOrderId);
+      if (sub?.status === 'REFUNDING') {
+        await orderRepo.updateSubOrderStatus(item.subOrderId, 'SHIPPED');
+      }
+    }
   }
+
   return { afterSale: afterSaleRepo.serialize(updated) };
 }
 
@@ -348,7 +426,7 @@ async function approveAfterSale(item, { auditReason = null } = {}) {
   return finalizeApprovedAfterSale(item, { auditReason });
 }
 
-/** 领域规则：售后拒绝关闭 → 订单退出 REFUNDING，恢复 SHIPPED */
+/** 领域规则：售后拒绝关闭 → 若无其它进行中售后，订单退出 REFUNDING */
 async function closeRejectedAfterSale(item, reason) {
   const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
     status: 'REJECTED',
@@ -356,10 +434,11 @@ async function closeRejectedAfterSale(item, reason) {
     auditedAt: new Date(),
   });
   const order = await orderRepo.findById(item.orderId);
-  if (order?.status === 'REFUNDING') {
+  const stillOpen = await orderHasInProgressAfterSale(item.orderId, item.afterSaleId);
+  if (!stillOpen && order?.status === 'REFUNDING') {
     await orderRepo.updateOrder(item.orderId, { status: 'SHIPPED' });
   }
-  if (item.subOrderId) {
+  if (!stillOpen && item.subOrderId) {
     const sub = order?.subOrders?.find((s) => s.subOrderId === item.subOrderId);
     if (sub?.status === 'REFUNDING') {
       await orderRepo.updateSubOrderStatus(item.subOrderId, 'SHIPPED');
@@ -1074,8 +1153,8 @@ export async function getOrderById(userId, orderId) {
   return serializeOrder(order, { includeSubOrders: true, afterSales });
 }
 
-/** 领域规则：SHIPPED/COMPLETED → REFUNDING；AfterSale APPLIED，商家 48h 处理窗口 */
-export async function createAfterSale(userId, orderId, { type, reason, subOrderId } = {}) {
+/** 领域规则：按 SKU 申请售后；一单可多笔；整件 quantity=剩余可售后量 */
+export async function createAfterSale(userId, orderId, { type, reason, subOrderId, items } = {}) {
   await expirePendingOrders();
   if (!AFTER_SALE_TYPES.has(type)) {
     return { error: 'INVALID_TYPE', message: '售后类型无效' };
@@ -1086,26 +1165,100 @@ export async function createAfterSale(userId, orderId, { type, reason, subOrderI
 
   const order = await orderRepo.findByIdAndUser(orderId, userId);
   if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
-  if (!['SHIPPED', 'COMPLETED'].includes(order.status)) {
-    return { error: 'INVALID_STATE', message: '仅已发货或已完成订单可申请售后' };
+  if (!['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(order.status)) {
+    return { error: 'INVALID_STATE', message: '仅已发货、已完成或退款中订单可继续申请售后' };
   }
 
   const existing = await afterSaleRepo.listByOrderId(orderId);
-  const hasOpen = existing.some((a) =>
-    ['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING'].includes(a.status),
-  );
-  if (hasOpen) {
-    return { error: 'ALREADY_EXISTS', message: '该订单已有进行中的售后' };
-  }
+  const occupiedBySku = getOccupiedQtyBySku(existing);
 
   let sub = null;
   if (subOrderId) {
     sub = order.subOrders.find((s) => s.subOrderId === Number(subOrderId));
     if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
-  } else {
-    sub = order.subOrders.find((s) => ['SHIPPED', 'COMPLETED'].includes(s.status)) || order.subOrders[0];
   }
-  if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+
+  const remainingBySub = new Map();
+  for (const s of order.subOrders || []) {
+    if (!['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(s.status)) continue;
+    remainingBySub.set(s.subOrderId, buildRemainingItemsForSub(s, occupiedBySku));
+  }
+
+  let selectedLines = [];
+  if (Array.isArray(items) && items.length > 0) {
+    const want = items.map((it) => ({
+      skuId: Number(it.skuId),
+      quantity: Number(it.quantity),
+    }));
+    for (const w of want) {
+      if (!Number.isInteger(w.skuId) || w.skuId <= 0) {
+        return { error: 'INVALID_INPUT', message: 'skuId 无效' };
+      }
+      if (!Number.isInteger(w.quantity) || w.quantity <= 0) {
+        return { error: 'INVALID_INPUT', message: 'quantity 须为正整数' };
+      }
+    }
+
+    // 定位子单：显式 subOrderId，或由 SKU 唯一归属推断
+    if (!sub) {
+      const candidates = [];
+      for (const [sid, remain] of remainingBySub.entries()) {
+        const ids = new Set(remain.map((r) => r.skuId));
+        if (want.every((w) => ids.has(w.skuId))) candidates.push(sid);
+      }
+      if (candidates.length === 1) {
+        sub = order.subOrders.find((s) => s.subOrderId === candidates[0]);
+      } else if (candidates.length === 0) {
+        return { error: 'INVALID_INPUT', message: '所选商品不在可售后子单中，或已无剩余可售后数量' };
+      } else {
+        return { error: 'INVALID_INPUT', message: '请指定 subOrderId（所选商品可能跨店）' };
+      }
+    }
+
+    const remainList = remainingBySub.get(sub.subOrderId) || [];
+    const remainMap = new Map(remainList.map((r) => [r.skuId, r]));
+    for (const w of want) {
+      const rem = remainMap.get(w.skuId);
+      if (!rem) {
+        return { error: 'INVALID_STATE', message: `SKU ${w.skuId} 无可售后剩余数量` };
+      }
+      // 本迭代：整件售后
+      if (w.quantity !== rem.quantity) {
+        return {
+          error: 'INVALID_INPUT',
+          message: `SKU ${w.skuId} 须整件申请，剩余可售后数量为 ${rem.quantity}`,
+        };
+      }
+      selectedLines.push({
+        skuId: rem.skuId,
+        title: rem.title,
+        price: rem.price,
+        quantity: rem.quantity,
+      });
+    }
+  } else {
+    // 兼容旧调用：未传 items 时，对该子单全部剩余商品整单申请
+    if (!sub) {
+      sub =
+        order.subOrders.find((s) => ['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(s.status)) ||
+        order.subOrders[0];
+    }
+    if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+    selectedLines = remainingBySub.get(sub.subOrderId) || [];
+    if (!selectedLines.length) {
+      return { error: 'INVALID_STATE', message: '该子单没有可申请售后的商品' };
+    }
+    selectedLines = selectedLines.map((r) => ({
+      skuId: r.skuId,
+      title: r.title,
+      price: r.price,
+      quantity: r.quantity,
+    }));
+  }
+
+  if (!selectedLines.length) {
+    return { error: 'INVALID_INPUT', message: '请选择要售后的商品' };
+  }
 
   const now = new Date();
   const merchantDeadline = new Date(now.getTime() + MERCHANT_AFTER_SALE_HOURS * 60 * 60 * 1000);
@@ -1121,11 +1274,15 @@ export async function createAfterSale(userId, orderId, { type, reason, subOrderI
     status: 'APPLIED',
     appliedAt: now,
     merchantDeadline,
-    items: sub.items,
+    items: selectedLines,
   });
 
-  await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
-  await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDING');
+  if (order.status !== 'REFUNDING') {
+    await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
+  }
+  if (sub.status !== 'REFUNDING') {
+    await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDING');
+  }
 
   return { afterSale: afterSaleRepo.serialize(created) };
 }
@@ -1237,6 +1394,20 @@ export async function cancelOrder(userId, orderId) {
     cancelReason: 'USER_CANCEL',
   });
   await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
+  const updated = await orderRepo.findById(order.orderId);
+  return { order: serializeOrder(updated, { includeSubOrders: true }) };
+}
+
+/** 领域：SHIPPED → COMPLETED（用户确认收货） */
+export async function confirmOrderReceipt(userId, orderId) {
+  await expirePendingOrders();
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+  if (order.status !== 'SHIPPED') {
+    return { error: 'INVALID_STATE', message: '仅已发货订单可确认收货' };
+  }
+  await orderRepo.updateOrder(order.orderId, { status: 'COMPLETED' });
+  await orderRepo.updateSubOrdersByOrder(order.orderId, 'SHIPPED', 'COMPLETED');
   const updated = await orderRepo.findById(order.orderId);
   return { order: serializeOrder(updated, { includeSubOrders: true }) };
 }

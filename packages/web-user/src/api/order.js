@@ -20,6 +20,10 @@ export function cancelOrder(orderId) {
   return client.post(`/orders/${orderId}/cancel`).then((r) => r.data);
 }
 
+export function confirmReceipt(orderId) {
+  return client.post(`/orders/${orderId}/confirm-receipt`).then((r) => r.data);
+}
+
 export function applyAfterSale(orderId, payload) {
   return client.post(`/orders/${orderId}/after-sales`, payload).then((r) => r.data);
 }
