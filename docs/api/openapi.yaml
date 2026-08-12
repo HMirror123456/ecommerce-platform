@@ -27,7 +27,7 @@ tags:
   - name: admin
     description: 平台管理
   - name: chat
-    description: 售后客服会话（USER_CS）
+    description: 售后沟通会话（USER_CS / USER_MERCHANT）
 
 paths:
   # ========== Auth ==========
@@ -1636,7 +1636,7 @@ paths:
         '200':
           description: OK
 
-  # ========== Chat (USER_CS) ==========
+  # ========== Chat (USER_CS / USER_MERCHANT) ==========
   /after-sales/{afterSaleId}/chat/thread:
     post:
       tags: [chat]
@@ -1667,11 +1667,49 @@ paths:
         '404':
           description: 售后不存在
 
+  /after-sales/{afterSaleId}/merchant-chat/thread:
+    post:
+      tags: [chat]
+      summary: 开聊或获取已有 USER_MERCHANT 会话（幂等）
+      description: |
+        用户对本人售后开聊；商家对本店售后开聊/取会话。
+        建议售后状态为 APPLIED 时新建；已有 OPEN 会话可直接返回。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已有会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '201':
+          description: 新建会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 非本人/非本店售后
+        '404':
+          description: 售后不存在
+        '409':
+          description: 当前售后状态不允许新建商家会话
+
   /chat/threads:
     get:
       tags: [chat]
       summary: 会话列表
-      description: 用户仅见自己的 USER_CS；CS_AGENT/SUPER_ADMIN 见全部
+      description: |
+        用户：本人会话（可按 type 过滤）；
+        商家：本店 USER_MERCHANT；
+        CS_AGENT/SUPER_ADMIN：USER_CS 全部。
       security:
         - bearerAuth: []
       parameters:
@@ -1680,6 +1718,12 @@ paths:
           schema:
             type: string
             enum: [OPEN, CLOSED]
+        - name: type
+          in: query
+          description: 不传则按角色默认（用户=全部类型，商家=USER_MERCHANT，客服=USER_CS）
+          schema:
+            type: string
+            enum: [USER_CS, USER_MERCHANT]
       responses:
         '200':
           description: OK
@@ -1750,9 +1794,10 @@ paths:
   /chat/threads/{threadId}/actions/{actionKey}:
     post:
       tags: [chat]
-      summary: 客服快捷动作
+      summary: 客服或商家快捷动作
       description: |
-        CS_APPROVE / CS_REJECT 调用售后 arbitrate；HINT_RETURN 仅写 SYSTEM 引导文案。
+        客服（USER_CS）：CS_APPROVE / CS_REJECT → arbitrate；HINT_RETURN → SYSTEM 文案。
+        商家（USER_MERCHANT）：MERCHANT_APPROVE / MERCHANT_REJECT → merchant after-sale audit，并写 SYSTEM 消息。
       security:
         - bearerAuth: []
       parameters:
@@ -1804,7 +1849,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [USER_CS]
+          enum: [USER_CS, USER_MERCHANT]
         afterSaleId:
           type: integer
         orderId:
@@ -1813,6 +1858,13 @@ components:
           type: string
         userId:
           type: integer
+        merchantId:
+          type: integer
+          nullable: true
+          description: USER_MERCHANT 时来自售后；USER_CS 可空
+        shopName:
+          type: string
+          nullable: true
         status:
           type: string
           enum: [OPEN, CLOSED]
@@ -1834,7 +1886,7 @@ components:
           type: integer
         senderType:
           type: string
-          enum: [USER, CS_AGENT, SYSTEM]
+          enum: [USER, CS_AGENT, MERCHANT, SYSTEM]
         senderId:
           type: integer
           nullable: true
@@ -1871,6 +1923,8 @@ components:
         - CS_APPROVE
         - CS_REJECT
         - HINT_RETURN
+        - MERCHANT_APPROVE
+        - MERCHANT_REJECT
 
     UserRegisterRequest:
       type: object

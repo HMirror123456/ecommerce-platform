@@ -110,8 +110,7 @@ erDiagram
 
 #### ChatThread / ChatMessage（售后沟通）
 - 详见 [`CHAT.md`](CHAT.md)
-- **本次实现**：`ChatThread.type = USER_CS`（用户 ↔ 平台客服）
-- **仅文档预留**：`USER_MERCHANT`（用户 ↔ 商家），不实现代码
+- **已实现**：`USER_CS`（用户 ↔ 平台客服）、`USER_MERCHANT`（用户 ↔ 商家）
 - **不变式**：同一 `afterSaleId` + `type` 至多一条 `OPEN` 会话；聊天快捷动作须走已有售后 API，不得绕过状态机
 
 ---

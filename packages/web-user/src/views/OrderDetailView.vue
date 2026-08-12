@@ -59,6 +59,9 @@ const returnForm = ref({
 
 const chatVisible = ref(false);
 const chatAfterSaleId = ref(null);
+const chatThreadType = ref('USER_CS');
+const chatCanEscalate = ref(false);
+const merchantChatTarget = ref(null);
 
 const canApplyAfterSale = computed(() => {
   if (!order.value) return false;
@@ -159,9 +162,31 @@ function canContactCs(afterSale) {
   return afterSale?.status === 'ESCALATED';
 }
 
+/** 领域规则：USER_MERCHANT，售后待商家处理时可协商 */
+function canContactMerchant(afterSale) {
+  return afterSale?.status === 'APPLIED';
+}
+
 function openCsChat(afterSale) {
+  chatThreadType.value = 'USER_CS';
+  chatCanEscalate.value = false;
+  merchantChatTarget.value = null;
   chatAfterSaleId.value = afterSale.afterSaleId;
   chatVisible.value = true;
+}
+
+function openMerchantChatDrawer(afterSale) {
+  chatThreadType.value = 'USER_MERCHANT';
+  chatCanEscalate.value = canEscalate(afterSale);
+  merchantChatTarget.value = afterSale;
+  chatAfterSaleId.value = afterSale.afterSaleId;
+  chatVisible.value = true;
+}
+
+async function onEscalateFromChat() {
+  if (!merchantChatTarget.value) return;
+  chatVisible.value = false;
+  await onEscalate(merchantChatTarget.value);
 }
 
 function canSubmitReturn(afterSale) {
@@ -286,6 +311,14 @@ onMounted(loadOrder);
           </div>
           <div class="as-actions">
             <el-button
+              v-if="canContactMerchant(as)"
+              plain
+              size="small"
+              @click="openMerchantChatDrawer(as)"
+            >
+              联系商家
+            </el-button>
+            <el-button
               v-if="canEscalate(as)"
               type="warning"
               plain
@@ -374,7 +407,13 @@ onMounted(loadOrder);
       </template>
     </el-dialog>
 
-    <AfterSaleChatDrawer v-model="chatVisible" :after-sale-id="chatAfterSaleId" />
+    <AfterSaleChatDrawer
+      v-model="chatVisible"
+      :after-sale-id="chatAfterSaleId"
+      :thread-type="chatThreadType"
+      :can-escalate="chatCanEscalate"
+      @escalate="onEscalateFromChat"
+    />
   </div>
 </template>
 

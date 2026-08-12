@@ -19,12 +19,21 @@ const THREAD_STATUS_LABELS = {
   CLOSED: '已关闭',
 };
 
+const THREAD_TYPE_LABELS = {
+  USER_CS: '平台客服',
+  USER_MERCHANT: '商家沟通',
+};
+
 const router = useRouter();
 const loading = ref(false);
 const threads = ref([]);
 const statusFilter = ref('OPEN');
+const typeFilter = ref('ALL');
 const chatVisible = ref(false);
 const chatAfterSaleId = ref(null);
+const chatOrderId = ref(null);
+const chatThreadType = ref('USER_CS');
+const chatCanEscalate = ref(false);
 
 function formatTime(iso) {
   if (!iso) return '-';
@@ -39,6 +48,10 @@ function threadStatusLabel(status) {
   return THREAD_STATUS_LABELS[status] || status || '-';
 }
 
+function threadTypeLabel(type) {
+  return THREAD_TYPE_LABELS[type] || type || '-';
+}
+
 async function loadThreads() {
   loading.value = true;
   try {
@@ -46,10 +59,13 @@ async function loadThreads() {
     if (statusFilter.value === 'OPEN' || statusFilter.value === 'CLOSED') {
       params.status = statusFilter.value;
     }
+    if (typeFilter.value === 'USER_CS' || typeFilter.value === 'USER_MERCHANT') {
+      params.type = typeFilter.value;
+    }
     const data = await fetchChatThreads(params);
     threads.value = data.list || [];
   } catch (e) {
-    ElMessage.error(e.message || '加载客服会话失败');
+    ElMessage.error(e.message || '加载会话失败');
     threads.value = [];
   } finally {
     loading.value = false;
@@ -61,8 +77,23 @@ function openChat(row) {
     ElMessage.warning('该会话缺少售后信息');
     return;
   }
+  chatThreadType.value = row.type === 'USER_MERCHANT' ? 'USER_MERCHANT' : 'USER_CS';
+  chatCanEscalate.value =
+    row.type === 'USER_MERCHANT' &&
+    (row.afterSaleStatus === 'APPLIED' || row.afterSaleStatus === 'REJECTED');
   chatAfterSaleId.value = row.afterSaleId;
+  chatOrderId.value = row.orderId || null;
   chatVisible.value = true;
+}
+
+function onEscalateFromList() {
+  chatVisible.value = false;
+  if (chatOrderId.value) {
+    router.push({ name: 'order-detail', params: { orderId: chatOrderId.value } });
+    ElMessage.info('请在订单详情中点击「申请平台介入」');
+    return;
+  }
+  router.push({ name: 'user-orders' });
 }
 
 function goOrder(row) {
@@ -77,19 +108,26 @@ onMounted(loadThreads);
   <div class="chat-list-page" v-loading="loading">
     <div class="page-header">
       <div>
-        <h2 class="page-title">我的客服会话</h2>
-        <p class="page-subtitle">查看与平台客服的售后沟通记录</p>
+        <h2 class="page-title">我的售后会话</h2>
+        <p class="page-subtitle">与平台客服、商家的售后沟通记录</p>
       </div>
-      <el-radio-group v-model="statusFilter" size="small" @change="loadThreads">
-        <el-radio-button label="OPEN">进行中</el-radio-button>
-        <el-radio-button label="CLOSED">已关闭</el-radio-button>
-        <el-radio-button label="ALL">全部</el-radio-button>
-      </el-radio-group>
+      <div class="filters">
+        <el-radio-group v-model="typeFilter" size="small" @change="loadThreads">
+          <el-radio-button label="ALL">全部类型</el-radio-button>
+          <el-radio-button label="USER_CS">平台客服</el-radio-button>
+          <el-radio-button label="USER_MERCHANT">商家</el-radio-button>
+        </el-radio-group>
+        <el-radio-group v-model="statusFilter" size="small" @change="loadThreads">
+          <el-radio-button label="OPEN">进行中</el-radio-button>
+          <el-radio-button label="CLOSED">已关闭</el-radio-button>
+          <el-radio-button label="ALL">全部状态</el-radio-button>
+        </el-radio-group>
+      </div>
     </div>
 
     <el-empty
       v-if="!loading && threads.length === 0"
-      description="暂无客服会话，可在订单详情申请平台介入后联系客服"
+      description="暂无会话。可在订单详情「联系商家」或申请平台介入后联系客服"
     >
       <el-button type="primary" @click="router.push({ name: 'user-orders' })">去我的订单</el-button>
     </el-empty>
@@ -104,12 +142,16 @@ onMounted(loadThreads);
         <div class="thread-main">
           <div class="title-row">
             <h3 class="title">订单 {{ row.orderNo || '-' }}</h3>
+            <el-tag size="small" :type="row.type === 'USER_MERCHANT' ? 'warning' : ''">
+              {{ threadTypeLabel(row.type) }}
+            </el-tag>
             <el-tag size="small" :type="row.status === 'OPEN' ? 'success' : 'info'">
               {{ threadStatusLabel(row.status) }}
             </el-tag>
           </div>
           <p class="meta">
             售后 #{{ row.afterSaleId }}
+            <template v-if="row.shopName"> · {{ row.shopName }}</template>
             · {{ afterSaleLabel(row.afterSaleStatus) }}
           </p>
           <p class="time">更新于 {{ formatTime(row.updatedAt) }}</p>
@@ -121,7 +163,13 @@ onMounted(loadThreads);
       </article>
     </div>
 
-    <AfterSaleChatDrawer v-model="chatVisible" :after-sale-id="chatAfterSaleId" />
+    <AfterSaleChatDrawer
+      v-model="chatVisible"
+      :after-sale-id="chatAfterSaleId"
+      :thread-type="chatThreadType"
+      :can-escalate="chatCanEscalate"
+      @escalate="onEscalateFromList"
+    />
   </div>
 </template>
 
@@ -142,6 +190,12 @@ onMounted(loadThreads);
   margin: 0;
   font-size: 13px;
   color: var(--text-muted);
+}
+.filters {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 .thread-list {
   display: flex;
@@ -173,6 +227,7 @@ onMounted(loadThreads);
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 .title {
   margin: 0;
@@ -202,6 +257,9 @@ onMounted(loadThreads);
   }
   .thread-actions {
     justify-content: flex-end;
+  }
+  .filters {
+    align-items: stretch;
   }
 }
 </style>

@@ -2,7 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { fetchChatMessages, openAfterSaleChat, sendChatMessage } from '@/api/chat';
+import { fetchChatMessages, openAfterSaleChat, openMerchantChat, sendChatMessage } from '@/api/chat';
 
 const AFTER_SALE_STATUS_LABELS = {
   APPLIED: '待商家处理',
@@ -21,8 +21,12 @@ const AFTER_SALE_TYPE_LABELS = {
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   afterSaleId: { type: Number, default: null },
+  /** USER_CS | USER_MERCHANT */
+  threadType: { type: String, default: 'USER_CS' },
+  /** 商家会话中展示「申请平台介入」 */
+  canEscalate: { type: Boolean, default: false },
 });
-const emit = defineEmits(['update:modelValue']);
+const emit = defineEmits(['update:modelValue', 'escalate']);
 
 const router = useRouter();
 const loading = ref(false);
@@ -33,6 +37,8 @@ const draft = ref('');
 const sending = ref(false);
 let pollTimer = null;
 
+const isMerchantChat = computed(() => props.threadType === 'USER_MERCHANT');
+const drawerTitle = computed(() => (isMerchantChat.value ? '联系商家' : '平台客服'));
 const threadOpen = computed(() => thread.value?.status === 'OPEN');
 const showEmpty = computed(() => !loading.value && !openError.value && thread.value && messages.value.length === 0);
 
@@ -63,6 +69,7 @@ function statusLabel(status) {
 function senderLabel(msg) {
   if (msg.senderType === 'USER') return '我';
   if (msg.senderType === 'CS_AGENT') return '客服';
+  if (msg.senderType === 'MERCHANT') return '商家';
   return '系统';
 }
 
@@ -92,17 +99,25 @@ async function loadMessages(reset) {
 
 async function openThread() {
   if (!props.afterSaleId) {
-    openError.value = '缺少售后单信息，无法打开客服会话';
+    openError.value = isMerchantChat.value
+      ? '缺少售后单信息，无法联系商家'
+      : '缺少售后单信息，无法打开客服会话';
     return;
   }
   loading.value = true;
   openError.value = '';
   try {
-    thread.value = await openAfterSaleChat(props.afterSaleId);
+    thread.value = isMerchantChat.value
+      ? await openMerchantChat(props.afterSaleId)
+      : await openAfterSaleChat(props.afterSaleId);
     await loadMessages(true);
     startPoll();
   } catch (e) {
-    openError.value = e.message || '无法打开客服会话，请确认已申请平台介入后重试';
+    openError.value =
+      e.message ||
+      (isMerchantChat.value
+        ? '无法打开商家会话，请确认售后仍待商家处理'
+        : '无法打开客服会话，请确认已申请平台介入后重试');
     thread.value = null;
     messages.value = [];
     ElMessage.error(openError.value);
@@ -192,7 +207,7 @@ onUnmounted(stopPoll);
 <template>
   <el-drawer
     :model-value="modelValue"
-    title="平台客服"
+    :title="drawerTitle"
     size="420px"
     @close="onClose"
     @update:model-value="emit('update:modelValue', $event)"
@@ -206,6 +221,7 @@ onUnmounted(stopPoll);
       <template v-else>
         <div v-if="thread" class="thread-meta">
           订单 {{ thread.orderNo }} · 售后 #{{ thread.afterSaleId }}
+          <template v-if="thread.shopName"> · {{ thread.shopName }}</template>
           <template v-if="threadStatusLabel"> · {{ threadStatusLabel }}</template>
           <el-tag v-if="!threadOpen" size="small" type="info" class="status-tag">已关闭</el-tag>
         </div>
@@ -262,6 +278,11 @@ onUnmounted(stopPoll);
 
         <div class="composer">
           <p v-if="thread && !threadOpen" class="closed-tip">会话已关闭，无法继续发送</p>
+          <div v-if="isMerchantChat && canEscalate" class="escalate-row">
+            <el-button type="warning" plain size="small" @click="emit('escalate')">
+              仍要申请平台介入
+            </el-button>
+          </div>
           <div class="composer-actions">
             <el-button :disabled="!threadOpen || sending" :loading="sending" @click="onSendCard">
               发送订单卡片
@@ -271,7 +292,7 @@ onUnmounted(stopPoll);
             v-model="draft"
             type="textarea"
             :rows="2"
-            placeholder="描述您的问题…（Ctrl+Enter 发送）"
+            :placeholder="isMerchantChat ? '与商家沟通…（Ctrl+Enter 发送）' : '描述您的问题…（Ctrl+Enter 发送）'"
             :disabled="!threadOpen || sending"
             @keydown.ctrl.enter="onSend"
           />
@@ -427,6 +448,9 @@ onUnmounted(stopPoll);
 .composer-actions {
   display: flex;
   gap: 8px;
+}
+.escalate-row {
+  margin-bottom: 0;
 }
 .closed-tip {
   margin: 0;

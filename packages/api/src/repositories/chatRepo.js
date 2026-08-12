@@ -69,9 +69,13 @@ export async function touchThread(threadId) {
   ]);
 }
 
-export async function listThreadsForUser(userId, { status } = {}) {
+export async function listThreadsForUser(userId, { status, type } = {}) {
   const params = [userId];
-  let sql = `SELECT * FROM chat_threads WHERE user_id = ? AND type = 'USER_CS'`;
+  let sql = `SELECT * FROM chat_threads WHERE user_id = ?`;
+  if (type) {
+    sql += ' AND type = ?';
+    params.push(type);
+  }
   if (status) {
     sql += ' AND status = ?';
     params.push(status);
@@ -89,6 +93,24 @@ export async function listThreadsForCs({ status } = {}) {
     params.push(status);
   }
   sql += ' ORDER BY updated_at DESC';
+  const [rows] = await pool.query(sql, params);
+  return rows.map(mapThread);
+}
+
+/** 商家侧：本店售后关联的 USER_MERCHANT 会话 */
+export async function listThreadsForMerchant(merchantId, { status } = {}) {
+  const params = [merchantId];
+  let sql = `
+    SELECT t.*
+    FROM chat_threads t
+    INNER JOIN after_sales a ON a.after_sale_id = t.after_sale_id
+    WHERE t.type = 'USER_MERCHANT' AND a.merchant_id = ?
+  `;
+  if (status) {
+    sql += ' AND t.status = ?';
+    params.push(status);
+  }
+  sql += ' ORDER BY t.updated_at DESC';
   const [rows] = await pool.query(sql, params);
   return rows.map(mapThread);
 }
