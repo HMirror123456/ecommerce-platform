@@ -10,6 +10,9 @@
   --text-muted: #999999;
   --border-color: #e8e8e8;
 }
+html {
+  overflow-y: scroll;
+}
 * { box-sizing: border-box; }
 html, body, #app {
   margin: 0;

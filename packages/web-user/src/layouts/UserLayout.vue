@@ -50,8 +50,9 @@ function onSearch() {
     </el-header>
 
     <el-main class="main">
+      <h1 v-if="route.name === 'cart'" class="layout-page-title">购物车</h1>
       <p
-        v-if="pageTitle && !['products', 'product-detail', 'profile', 'user-orders', 'user-favorites', 'user-addresses'].includes(route.name)"
+        v-else-if="pageTitle && !['products', 'product-detail', 'profile', 'user-orders', 'user-favorites', 'user-addresses'].includes(route.name)"
         class="page-breadcrumb"
       >
         {{ pageTitle }}
@@ -128,14 +129,28 @@ function onSearch() {
 }
 .main {
   max-width: 1200px;
+  width: 100%;
   margin: 0 auto;
   padding: 24px;
   flex: 1;
+  display: block;
+  text-align: left;
+  box-sizing: border-box;
+}
+.layout-page-title {
+  margin: 0 0 16px;
+  padding: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-title);
+  text-align: left;
 }
 .page-breadcrumb {
   margin: 0 0 16px;
   font-size: 13px;
   color: var(--text-muted);
+  text-align: left;
 }
 .footer {
   height: auto;

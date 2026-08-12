@@ -83,133 +83,143 @@ onMounted(loadCart);
 </script>
 
 <template>
-  <div class="cart-page" v-loading="loading">
-    <div class="page-header">
-      <h2 class="page-title">购物车</h2>
-      <p v-if="items.length > 0" class="page-subtitle">
-        共 {{ items.length }} 件
-        <template v-if="invalidCount > 0">（含 {{ invalidCount }} 件失效）</template>
-      </p>
-    </div>
-
-    <el-empty v-if="!loading && items.length === 0" description="购物车是空的">
-      <el-button type="primary" @click="router.push({ name: 'products' })">去逛逛</el-button>
-    </el-empty>
-
-    <template v-else-if="items.length > 0">
-      <el-card shadow="never" class="cart-card">
-        <div class="cart-header">
-          <span class="col-product">商品信息</span>
-          <span class="col-price">单价</span>
-          <span class="col-qty">数量</span>
-          <span class="col-subtotal">小计</span>
-          <span class="col-action">操作</span>
-        </div>
-
-        <div
-          v-for="row in items"
-          :key="row.itemId"
-          class="cart-row"
-          :class="{ invalid: isInvalid(row) }"
-        >
-          <div class="col-product product-cell">
-            <div class="thumb-wrap">
-              <img
-                v-if="row.sku?.mainImage"
-                :src="row.sku.mainImage"
-                class="thumb"
-                :alt="row.sku?.title || ''"
-              />
-              <div v-else class="thumb placeholder">无图</div>
-              <span v-if="isInvalid(row)" class="invalid-badge">失效</span>
-            </div>
-            <div class="product-text">
-              <p class="title">{{ row.sku?.title || '-' }}</p>
-              <p class="meta">
-                <span v-if="row.sku?.shopName">{{ row.sku.shopName }} · </span>
-                {{ formatSpec(row.sku?.specJson) }}
-              </p>
-              <p v-if="!isInvalid(row)" class="stock">库存 {{ row.sku?.stock ?? 0 }} 件</p>
-            </div>
-          </div>
-
-          <div class="col-price">
-            <span class="cell-label">单价</span>
-            {{ isInvalid(row) ? '-' : formatPrice(row.sku?.price) }}
-          </div>
-
-          <div class="col-qty">
-            <span class="cell-label">数量</span>
-            <el-input-number
-              :model-value="row.quantity"
-              :min="1"
-              :max="Math.max(1, row.sku?.stock || 1)"
-              size="small"
-              :disabled="updatingId === row.itemId || isInvalid(row)"
-              @change="(val) => onQuantityChange(row, val)"
-            />
-          </div>
-
-          <div class="col-subtotal">
-            <span class="cell-label">小计</span>
-            <span class="subtotal-value">
-              {{ isInvalid(row) ? '-' : formatPrice((row.sku?.price || 0) * row.quantity) }}
-            </span>
-          </div>
-
-          <div class="col-action">
-            <el-button link type="danger" @click="onRemove(row)">删除</el-button>
-          </div>
-        </div>
-      </el-card>
-
-      <div class="cart-footer">
-        <div class="footer-left">
-          <el-button link type="primary" @click="router.push({ name: 'products' })">
-            继续购物
-          </el-button>
-          <span class="footer-hint">已选 {{ validItems.length }} 件可结算商品</span>
-        </div>
-        <div class="footer-right">
-          <div class="total">
-            合计：
-            <span class="total-amount">{{ formatPrice(totalAmount) }}</span>
-          </div>
-          <el-button
-            type="primary"
-            size="large"
-            :disabled="validItems.length === 0"
-            @click="goCheckout"
-          >
-            去结算
-          </el-button>
-        </div>
+  <div class="cart-page">
+    <div class="cart-body" v-loading="loading">
+      <div v-if="!loading && items.length === 0" class="empty-tip">
+        <p class="empty-text">购物车是空的，去挑几件喜欢的商品吧</p>
+        <el-button type="primary" @click="router.push({ name: 'products' })">去逛逛</el-button>
       </div>
-    </template>
+
+      <template v-else-if="items.length > 0">
+        <p class="page-subtitle">
+          共 {{ items.length }} 件
+          <template v-if="invalidCount > 0">（含 {{ invalidCount }} 件失效）</template>
+        </p>
+
+        <el-card shadow="never" class="cart-card">
+          <div class="cart-header">
+            <span class="col-product">商品信息</span>
+            <span class="col-price">单价</span>
+            <span class="col-qty">数量</span>
+            <span class="col-subtotal">小计</span>
+            <span class="col-action">操作</span>
+          </div>
+
+          <div
+            v-for="row in items"
+            :key="row.itemId"
+            class="cart-row"
+            :class="{ invalid: isInvalid(row) }"
+          >
+            <div class="col-product product-cell">
+              <div class="thumb-wrap">
+                <img
+                  v-if="row.sku?.mainImage"
+                  :src="row.sku.mainImage"
+                  class="thumb"
+                  :alt="row.sku?.title || ''"
+                />
+                <div v-else class="thumb placeholder">无图</div>
+                <span v-if="isInvalid(row)" class="invalid-badge">失效</span>
+              </div>
+              <div class="product-text">
+                <p class="title">{{ row.sku?.title || '-' }}</p>
+                <p class="meta">
+                  <span v-if="row.sku?.shopName">{{ row.sku.shopName }} · </span>
+                  {{ formatSpec(row.sku?.specJson) }}
+                </p>
+                <p v-if="!isInvalid(row)" class="stock">库存 {{ row.sku?.stock ?? 0 }} 件</p>
+              </div>
+            </div>
+
+            <div class="col-price">
+              <span class="cell-label">单价</span>
+              {{ isInvalid(row) ? '-' : formatPrice(row.sku?.price) }}
+            </div>
+
+            <div class="col-qty">
+              <span class="cell-label">数量</span>
+              <el-input-number
+                :model-value="row.quantity"
+                :min="1"
+                :max="Math.max(1, row.sku?.stock || 1)"
+                size="small"
+                :disabled="updatingId === row.itemId || isInvalid(row)"
+                @change="(val) => onQuantityChange(row, val)"
+              />
+            </div>
+
+            <div class="col-subtotal">
+              <span class="cell-label">小计</span>
+              <span class="subtotal-value">
+                {{ isInvalid(row) ? '-' : formatPrice((row.sku?.price || 0) * row.quantity) }}
+              </span>
+            </div>
+
+            <div class="col-action">
+              <el-button link type="danger" @click="onRemove(row)">删除</el-button>
+            </div>
+          </div>
+        </el-card>
+
+        <div class="cart-footer">
+          <div class="footer-left">
+            <el-button link type="primary" @click="router.push({ name: 'products' })">
+              继续购物
+            </el-button>
+            <span class="footer-hint">已选 {{ validItems.length }} 件可结算商品</span>
+          </div>
+          <div class="footer-right">
+            <div class="total">
+              合计：
+              <span class="total-amount">{{ formatPrice(totalAmount) }}</span>
+            </div>
+            <el-button
+              type="primary"
+              size="large"
+              :disabled="validItems.length === 0"
+              @click="goCheckout"
+            >
+              去结算
+            </el-button>
+          </div>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .cart-page {
-  max-width: 960px;
-  margin: 0 auto;
+  width: 100%;
   padding-bottom: 32px;
 }
 
-.page-header {
-  margin-bottom: 16px;
-}
-
-.page-title {
-  margin: 0 0 6px;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-title);
+.cart-body {
+  width: 100%;
+  min-height: 160px;
 }
 
 .page-subtitle {
-  margin: 0;
+  margin: 0 0 16px;
   font-size: 13px;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.empty-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: calc(100vh - 220px);
+  padding: 24px;
+}
+
+.empty-text {
+  margin: 0 0 16px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 
@@ -262,10 +272,7 @@ onMounted(loadCart);
   text-align: center;
 }
 
-.col-subtotal {
-  text-align: right;
-}
-
+.col-subtotal,
 .col-action {
   text-align: right;
 }
