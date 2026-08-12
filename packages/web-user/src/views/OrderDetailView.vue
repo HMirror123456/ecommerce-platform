@@ -6,6 +6,7 @@ import {
   applyAfterSale,
   cancelOrder,
   confirmReceipt,
+  confirmSubOrderReceipt,
   escalateAfterSale,
   fetchOrder,
   submitAfterSaleReturn,
@@ -123,6 +124,20 @@ const canApplyAfterSale = computed(() => {
   return false;
 });
 
+/** 全部活跃子单均已发货时可整单确认 */
+const canConfirmAllReceipt = computed(() => {
+  const subs = (order.value?.subOrders || []).filter((s) => s.status !== 'CANCELLED');
+  return (
+    subs.length > 0 &&
+    subs.every((s) => s.status === 'SHIPPED') &&
+    order.value?.status === 'SHIPPED'
+  );
+});
+
+const hasShippedSubToConfirm = computed(() =>
+  (order.value?.subOrders || []).some((s) => s.status === 'SHIPPED'),
+);
+
 function formatPrice(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
 }
@@ -163,12 +178,31 @@ async function onCancel() {
   }
 }
 
-/** 领域：SHIPPED → COMPLETED */
+/** 整单确认：全部子单均为 SHIPPED */
 async function onConfirmReceipt() {
   try {
-    await ElMessageBox.confirm('确认已收到商品？确认后订单将完成。', '确认收货', { type: 'info' });
+    await ElMessageBox.confirm('确认已收到全部店铺商品？确认后订单将完成。', '确认收货', {
+      type: 'info',
+    });
     await confirmReceipt(orderId.value);
     ElMessage.success('确认收货成功，订单已完成');
+    await loadOrder();
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '确认收货失败');
+  }
+}
+
+/** 领域：子单 SHIPPED → COMPLETED */
+async function onConfirmSubReceipt(sub) {
+  try {
+    await ElMessageBox.confirm(
+      `确认已收到「${sub.shopName}」的商品？确认后该店铺包裹将完成。`,
+      '确认收货',
+      { type: 'info' },
+    );
+    const data = await confirmSubOrderReceipt(orderId.value, sub.subOrderId);
+    const done = data?.order?.status === 'COMPLETED';
+    ElMessage.success(done ? '确认收货成功，订单已完成' : '已确认该店铺收货');
     await loadOrder();
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message || '确认收货失败');
@@ -359,6 +393,13 @@ onMounted(loadOrder);
           <el-descriptions-item label="应付金额">
             <span class="amount">{{ formatPrice(order.totalAmount) }}</span>
           </el-descriptions-item>
+          <el-descriptions-item
+            v-if="hasShippedSubToConfirm && order.autoConfirmDeadline"
+            label="自动确认"
+            :span="2"
+          >
+            最早将于 {{ formatTime(order.autoConfirmDeadline) }} 自动确认已发货包裹（各店铺发货后约 10 分钟）
+          </el-descriptions-item>
         </el-descriptions>
       </el-card>
 
@@ -385,19 +426,32 @@ onMounted(loadOrder);
               <strong>{{ sub.shopName }}</strong>
               · {{ ORDER_STATUS_LABELS[sub.status] || sub.status }}
             </p>
-            <el-button
-              v-if="canContactShop(sub)"
-              type="primary"
-              plain
-              size="small"
-              @click="openShopChat(sub)"
-            >
-              联系商家
-            </el-button>
+            <div class="sub-actions">
+              <el-button
+                v-if="sub.status === 'SHIPPED'"
+                type="primary"
+                size="small"
+                @click="onConfirmSubReceipt(sub)"
+              >
+                确认收货
+              </el-button>
+              <el-button
+                v-if="canContactShop(sub)"
+                type="primary"
+                plain
+                size="small"
+                @click="openShopChat(sub)"
+              >
+                联系商家
+              </el-button>
+            </div>
           </div>
           <p v-if="sub.shipment" class="line muted">
             {{ sub.shipment.logisticsCompany }} {{ sub.shipment.trackingNo }}
             · 发货于 {{ formatTime(sub.shipment.shippedAt) }}
+          </p>
+          <p v-if="sub.status === 'SHIPPED' && sub.autoConfirmDeadline" class="line muted">
+            将于 {{ formatTime(sub.autoConfirmDeadline) }} 自动确认收货
           </p>
         </div>
       </el-card>
@@ -488,11 +542,11 @@ onMounted(loadOrder);
           去支付
         </el-button>
         <el-button
-          v-if="order.status === 'SHIPPED'"
+          v-if="canConfirmAllReceipt"
           type="primary"
           @click="onConfirmReceipt"
         >
-          确认收货
+          确认全部收货
         </el-button>
       </div>
     </template>
@@ -605,6 +659,12 @@ onMounted(loadOrder);
   flex-wrap: wrap;
 }
 .sub-row .line { margin-bottom: 0; }
+.sub-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .after-sale-row {
   display: flex;
   align-items: flex-start;

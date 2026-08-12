@@ -24,6 +24,13 @@ export function confirmReceipt(orderId) {
   return client.post(`/orders/${orderId}/confirm-receipt`).then((r) => r.data);
 }
 
+/** 领域：子单 SHIPPED → COMPLETED */
+export function confirmSubOrderReceipt(orderId, subOrderId) {
+  return client
+    .post(`/orders/${orderId}/sub-orders/${subOrderId}/confirm-receipt`)
+    .then((r) => r.data);
+}
+
 export function applyAfterSale(orderId, payload) {
   return client.post(`/orders/${orderId}/after-sales`, payload).then((r) => r.data);
 }

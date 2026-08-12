@@ -14,6 +14,8 @@ import * as stockRepo from '../repositories/stockRepo.js';
 import * as chatRepo from '../repositories/chatRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
+/** 演示：全部子单发货后 10 分钟自动确认收货（对标业务约 7 天） */
+const ORDER_AUTO_CONFIRM_MS = 10 * 60 * 1000;
 
 // Legacy product fixtures; main category/product/stock flows use repository-backed MySQL data.
 export const categories = [
@@ -293,7 +295,98 @@ export async function expirePendingOrders() {
     });
     await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
   }
+  await autoConfirmShippedOrders();
   await escalateOverdueAfterSales();
+}
+
+/**
+ * 领域：SHIPPED → COMPLETED（超时自动确认收货，按子单）
+ * 每个 SHIPPED 子单独立判断 shippedAt + ORDER_AUTO_CONFIRM_MS
+ */
+export async function autoConfirmShippedOrders() {
+  const candidates = await orderRepo.listOrdersByStatus('SHIPPED');
+  // 部分发货时主单也可能仍是 PENDING_SHIPMENT？当前发货逻辑会把主单置 SHIPPED。
+  // 另扫 PENDING_SHIPMENT 以防历史数据：有子单已发货但主单未升态
+  const pendingShip = await orderRepo.listOrdersByStatus('PENDING_SHIPMENT');
+  const seen = new Set();
+  const orders = [];
+  for (const order of [...candidates, ...pendingShip]) {
+    if (seen.has(order.orderId)) continue;
+    seen.add(order.orderId);
+    orders.push(order);
+  }
+
+  const now = Date.now();
+  for (const order of orders) {
+    let changed = false;
+    for (const sub of order.subOrders || []) {
+      if (sub.status !== 'SHIPPED') continue;
+      const shippedAtMs = getSubShippedAtMs(sub);
+      if (shippedAtMs == null) continue;
+      if (shippedAtMs + ORDER_AUTO_CONFIRM_MS > now) continue;
+      await orderRepo.updateSubOrderStatus(sub.subOrderId, 'COMPLETED');
+      changed = true;
+    }
+    if (changed) {
+      const fresh = await orderRepo.findById(order.orderId);
+      await syncMainOrderFulfillmentStatus(fresh);
+    }
+  }
+}
+
+function getSubShippedAtMs(sub) {
+  const raw = sub?.shipment?.shippedAt;
+  const t = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+function computeSubAutoConfirmDeadline(sub) {
+  if (sub.status !== 'SHIPPED') return null;
+  const shippedAtMs = getSubShippedAtMs(sub);
+  if (shippedAtMs == null) return null;
+  return new Date(shippedAtMs + ORDER_AUTO_CONFIRM_MS).toISOString();
+}
+
+/** 主单展示：最早一个待自动确认的子单截止时间 */
+function computeAutoConfirmDeadline(order) {
+  let earliest = null;
+  for (const sub of order.subOrders || []) {
+    const d = computeSubAutoConfirmDeadline(sub);
+    if (!d) continue;
+    if (!earliest || new Date(d).getTime() < new Date(earliest).getTime()) earliest = d;
+  }
+  return earliest;
+}
+
+/**
+ * 履约完成后聚合主单状态（不覆盖 REFUNDING/REFUNDED/CANCELLED/PENDING_PAYMENT）
+ * - 全部活跃子单 COMPLETED → 主单 COMPLETED
+ * - 存在 SHIPPED/COMPLETED 且无待发货 → SHIPPED
+ * - 存在 SHIPPED/COMPLETED 且仍有 PENDING_SHIPMENT → SHIPPED（部分发货）
+ * - 仅有待发货 → PENDING_SHIPMENT
+ */
+async function syncMainOrderFulfillmentStatus(order) {
+  if (!order) return null;
+  if (['REFUNDING', 'REFUNDED', 'CANCELLED', 'PENDING_PAYMENT'].includes(order.status)) {
+    return order;
+  }
+  const active = (order.subOrders || []).filter((s) => s.status !== 'CANCELLED');
+  if (!active.length) return order;
+
+  let next = order.status;
+  if (active.every((s) => s.status === 'COMPLETED')) {
+    next = 'COMPLETED';
+  } else if (active.some((s) => s.status === 'SHIPPED' || s.status === 'COMPLETED')) {
+    next = 'SHIPPED';
+  } else if (active.every((s) => s.status === 'PENDING_SHIPMENT' || s.status === 'PAID')) {
+    next = 'PENDING_SHIPMENT';
+  }
+
+  if (next !== order.status) {
+    await orderRepo.updateOrder(order.orderId, { status: next });
+    return orderRepo.findById(order.orderId);
+  }
+  return order;
 }
 
 /** 领域规则：商家 48h 未处理 APPLIED → ESCALATED */
@@ -1032,6 +1125,9 @@ function formatAddressSnapshot(address) {
 }
 
 function serializeOrder(order, { includeSubOrders = false, afterSales = null } = {}) {
+  const activeSubs = (order.subOrders || []).filter((s) => s.status !== 'CANCELLED');
+  const canConfirmAllReceipt =
+    activeSubs.length > 0 && activeSubs.every((s) => s.status === 'SHIPPED');
   const base = {
     orderId: order.orderId,
     orderNo: order.orderNo,
@@ -1045,6 +1141,8 @@ function serializeOrder(order, { includeSubOrders = false, afterSales = null } =
     })),
     createdAt: order.createdAt,
     paymentDeadline: order.paymentDeadline,
+    autoConfirmDeadline: computeAutoConfirmDeadline(order),
+    canConfirmAllReceipt,
   };
   if (includeSubOrders) {
     base.subOrders = order.subOrders.map((s) => ({
@@ -1054,6 +1152,7 @@ function serializeOrder(order, { includeSubOrders = false, afterSales = null } =
       status: s.status,
       items: s.items,
       shipment: s.shipment || null,
+      autoConfirmDeadline: computeSubAutoConfirmDeadline(s),
     }));
     base.addressSnapshot = order.addressSnapshot;
   }
@@ -1422,17 +1521,53 @@ export async function cancelOrder(userId, orderId) {
   return { order: serializeOrder(updated, { includeSubOrders: true }) };
 }
 
-/** 领域：SHIPPED → COMPLETED（用户确认收货） */
+/** 领域：子单 SHIPPED → COMPLETED；主单全部完成后聚合 COMPLETED */
+export async function confirmSubOrderReceipt(userId, orderId, subOrderId) {
+  await expirePendingOrders();
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+  const sub = order.subOrders.find((s) => s.subOrderId === Number(subOrderId));
+  if (!sub) return { error: 'NOT_FOUND', message: '子订单不存在' };
+  if (sub.status !== 'SHIPPED') {
+    return { error: 'INVALID_STATE', message: '仅已发货的店铺包裹可确认收货' };
+  }
+  await orderRepo.updateSubOrderStatus(sub.subOrderId, 'COMPLETED');
+  const fresh = await orderRepo.findById(order.orderId);
+  const updated = await syncMainOrderFulfillmentStatus(fresh);
+  return { order: serializeOrder(updated, { includeSubOrders: true }) };
+}
+
+/**
+ * 整单确认：仅当全部活跃子单均为 SHIPPED 时，一次性确认所有店铺。
+ * 若仍有未发货子单 → 409，引导按子单确认。
+ */
 export async function confirmOrderReceipt(userId, orderId) {
   await expirePendingOrders();
   const order = await orderRepo.findByIdAndUser(orderId, userId);
   if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
-  if (order.status !== 'SHIPPED') {
-    return { error: 'INVALID_STATE', message: '仅已发货订单可确认收货' };
+  const active = (order.subOrders || []).filter((s) => s.status !== 'CANCELLED');
+  if (!active.length) {
+    return { error: 'INVALID_STATE', message: '订单没有可确认的包裹' };
   }
-  await orderRepo.updateOrder(order.orderId, { status: 'COMPLETED' });
-  await orderRepo.updateSubOrdersByOrder(order.orderId, 'SHIPPED', 'COMPLETED');
-  const updated = await orderRepo.findById(order.orderId);
+  if (active.some((s) => s.status === 'PENDING_SHIPMENT' || s.status === 'PAID')) {
+    return {
+      error: 'INVALID_STATE',
+      message: '仍有商品未发货，请对已发货的店铺分别确认收货',
+    };
+  }
+  if (!active.every((s) => s.status === 'SHIPPED' || s.status === 'COMPLETED')) {
+    return { error: 'INVALID_STATE', message: '当前订单状态不允许整单确认收货' };
+  }
+  if (!active.some((s) => s.status === 'SHIPPED')) {
+    return { error: 'INVALID_STATE', message: '没有待确认收货的包裹' };
+  }
+  for (const sub of active) {
+    if (sub.status === 'SHIPPED') {
+      await orderRepo.updateSubOrderStatus(sub.subOrderId, 'COMPLETED');
+    }
+  }
+  const fresh = await orderRepo.findById(order.orderId);
+  const updated = await syncMainOrderFulfillmentStatus(fresh);
   return { order: serializeOrder(updated, { includeSubOrders: true }) };
 }
 
@@ -1464,19 +1599,10 @@ export async function shipSubOrder(merchantId, subOrderId, { logisticsCompany, t
   await orderRepo.shipSubOrder(subOrderId, shipment);
 
   const updated = await orderRepo.findById(order.orderId);
-  const updatedSub = updated.subOrders.find((s) => s.subOrderId === subOrderId);
-  const activeSubs = updated.subOrders.filter((s) => s.status !== 'CANCELLED');
-  let orderStatus = updated.status;
-  if (activeSubs.length > 0 && activeSubs.every((s) => s.status === 'SHIPPED' || s.status === 'COMPLETED')) {
-    orderStatus = 'SHIPPED';
-  } else if (updated.status === 'PENDING_SHIPMENT' && activeSubs.some((s) => s.status === 'SHIPPED')) {
-    orderStatus = 'SHIPPED';
-  }
-  if (orderStatus !== updated.status) {
-    await orderRepo.updateOrder(order.orderId, { status: orderStatus });
-  }
+  const synced = await syncMainOrderFulfillmentStatus(updated);
+  const updatedSub = synced.subOrders.find((s) => s.subOrderId === subOrderId);
 
-  return { subOrder: updatedSub, orderId: order.orderId, orderStatus };
+  return { subOrder: updatedSub, orderId: order.orderId, orderStatus: synced.status };
 }
 
 export async function getMerchantAfterSales(merchantId, status) {

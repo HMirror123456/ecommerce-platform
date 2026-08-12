@@ -680,10 +680,11 @@ paths:
   /orders/{orderId}/confirm-receipt:
     post:
       tags: [order]
-      summary: 确认收货
+      summary: 整单确认收货
       description: |
-        用户确认收货。仅已发货（SHIPPED）订单可操作。
-        主单与仍为 SHIPPED 的子单状态变为 COMPLETED（领域：SHIPPED → COMPLETED）。
+        仅当全部活跃子单均为已发货（SHIPPED）时可操作，将各 SHIPPED 子单与主单置为 COMPLETED。
+        若仍有子单未发货，请改用按子单确认收货接口。
+        领域：SubOrder SHIPPED → COMPLETED；主单全部完成后聚合为 COMPLETED。
       security:
         - bearerAuth: []
       parameters:
@@ -698,7 +699,35 @@ paths:
         '404':
           description: 订单不存在
         '409':
-          description: 订单状态不允许确认收货
+          description: 仍有子单未发货或状态不允许确认收货
+
+  /orders/{orderId}/sub-orders/{subOrderId}/confirm-receipt:
+    post:
+      tags: [order]
+      summary: 按子单确认收货
+      description: |
+        用户确认某一店铺（子单）已收货。仅该子单为 SHIPPED 时可操作。
+        子单 → COMPLETED 后按规则聚合主单：全部活跃子单 COMPLETED 时主单才 COMPLETED。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: subOrderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 确认成功，返回更新后的订单
+        '404':
+          description: 订单或子单不存在
+        '409':
+          description: 子单状态不允许确认收货
 
   /orders/{orderId}/after-sales:
     post:
@@ -2617,6 +2646,24 @@ components:
             shippedAt:
               type: string
               format: date-time
+        autoConfirmDeadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: 该子单自动确认收货截止时间（仅 SHIPPED 时有值）
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              skuId:
+                type: integer
+              title:
+                type: string
+              price:
+                type: number
+              quantity:
+                type: integer
 
     ProductStatus:
       type: string
@@ -3100,3 +3147,27 @@ components:
         createdAt:
           type: string
           format: date-time
+        paymentDeadline:
+          type: string
+          format: date-time
+          description: 待支付截止时间（创建后 15 分钟）
+        canConfirmAllReceipt:
+          type: boolean
+          description: 全部活跃子单均为 SHIPPED 时为 true，可调用整单确认收货
+        autoConfirmDeadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            主单维度：当前最早将自动确认的已发货子单截止时间（有 SHIPPED 子单时返回）。
+            子单维度见 subOrders[].autoConfirmDeadline。
+        subOrders:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubOrder'
+        addressSnapshot:
+          type: object
+        afterSales:
+          type: array
+          items:
+            $ref: '#/components/schemas/AfterSale'

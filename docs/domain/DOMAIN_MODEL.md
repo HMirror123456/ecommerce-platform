@@ -130,7 +130,7 @@ stateDiagram-v2
     PENDING_PAYMENT --> CANCELLED: 超时15min或用户取消
     PAID --> PENDING_SHIPMENT: 进入待发货
     PENDING_SHIPMENT --> SHIPPED: 商家发货
-    SHIPPED --> COMPLETED: 确认收货或超时自动
+    SHIPPED --> COMPLETED: 子单确认收货/超时自动；主单在全部子单完成后聚合
     SHIPPED --> REFUNDING: 申请售后
     COMPLETED --> REFUNDING: 申请售后
     REFUNDING --> REFUNDED: 退款完成
@@ -146,8 +146,8 @@ stateDiagram-v2
 | 待支付 | PENDING_PAYMENT | 下单成功 | 支付、取消 |
 | 已支付 | PAID | mock 支付成功 | —（瞬时态，进入待发货） |
 | 待发货 | PENDING_SHIPMENT | 支付完成 | 商家发货 |
-| 已发货 | SHIPPED | 填写物流 | 确认收货、申请售后 |
-| 已完成 | COMPLETED | 确认收货 | 申请售后（可选） |
+| 已发货 | SHIPPED | 填写物流（可部分子单先发） | 对已发货子单确认收货、申请售后 |
+| 已完成 | COMPLETED | 全部活跃子单均已完成（确认收货或超时自动） | 申请售后（可选） |
 | 已取消 | CANCELLED | 未支付取消 | — |
 | 退款中 | REFUNDING | 售后受理 | — |
 | 已退款 | REFUNDED | 退款成功 | — |
@@ -162,12 +162,21 @@ stateDiagram-v2
 **Q2：是否拆单？**
 - [x] 按商家拆 `SubOrder`（同一购物车多商家 → 一个主订单 + 多个子订单）
 - 说明：商家后台只见本店 sub_order；用户见主订单聚合展示
+- **确认收货按子单**：`SubOrder SHIPPED → COMPLETED`；主单仅当全部活跃子单均为 `COMPLETED` 时才 → `COMPLETED`
+- 部分发货时主单可为 `SHIPPED`（仍有子单 `PENDING_SHIPMENT`），此时不可整单确认，仅可确认已发货子单
 
 **Q3：促销？**
 - 不做优惠券/满减/秒杀；单价 = SKU.price
 
 **支付方案：**
 - Mock：前端调 `POST /orders/{id}/pay` 即成功，写 `payments` 表
+
+**自动确认收货：**
+- 粒度：每个 `SHIPPED` 子单独立计时（`shipment.shippedAt` + 阈值）
+- 超时阈值：演示环境 **10 分钟**（对标业务常见约 7 天；常量 `ORDER_AUTO_CONFIRM_MS`）
+- 到期后该子单 → `COMPLETED`，再按上列规则聚合主单状态
+- 访问订单相关接口时扫描过期（与待支付 15min 超时同一机制）
+- 整单确认接口仅当全部活跃子单均为 `SHIPPED` 时可用（等价于一次性确认所有店铺）
 
 **售后超时：**
 - 商家 48h 未处理 → `AfterSale.status = ESCALATED`；用户亦可主动「申请平台介入」

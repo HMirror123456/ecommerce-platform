@@ -54,10 +54,10 @@ function goPay(orderId) {
   router.push({ name: 'payment', params: { orderId } });
 }
 
-/** 领域：SHIPPED → COMPLETED */
+/** 整单确认：仅全部子单已发货时（后端 canConfirmAllReceipt） */
 async function onConfirmReceipt(orderId) {
   try {
-    await ElMessageBox.confirm('确认已收到商品？确认后订单将完成。', '确认收货', { type: 'info' });
+    await ElMessageBox.confirm('确认已收到全部商品？确认后订单将完成。', '确认收货', { type: 'info' });
     await confirmReceipt(orderId);
     ElMessage.success('确认收货成功，订单已完成');
     await loadOrders();
@@ -113,11 +113,19 @@ onMounted(loadOrders);
               去支付
             </el-button>
             <el-button
-              v-if="order.status === 'SHIPPED'"
+              v-if="order.canConfirmAllReceipt"
               type="primary"
               @click="onConfirmReceipt(order.orderId)"
             >
               确认收货
+            </el-button>
+            <el-button
+              v-else-if="order.status === 'SHIPPED'"
+              type="primary"
+              plain
+              @click="goDetail(order.orderId)"
+            >
+              去确认收货
             </el-button>
             <el-button @click="goDetail(order.orderId)">查看详情</el-button>
           </div>
