@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import ProductSearchBar from '@/components/ProductSearchBar.vue';
@@ -11,6 +11,8 @@ const items = ref([]);
 const updatingId = ref(null);
 const searchKeyword = ref('');
 const appliedKeyword = ref('');
+/** 勾选的购物车行 itemId（仅有效商品参与结算） */
+const selectedIds = ref([]);
 
 const filteredItems = computed(() => {
   const kw = appliedKeyword.value.trim().toLowerCase();
@@ -22,19 +24,34 @@ const filteredItems = computed(() => {
   });
 });
 
-const validItems = computed(() =>
-  filteredItems.value.filter((item) => item.sku?.title && item.sku.title !== '商品已下架'),
-);
-
-const invalidCount = computed(() => filteredItems.value.length - validItems.value.length);
-
-const totalAmount = computed(() =>
-  validItems.value.reduce((sum, item) => sum + (item.sku?.price || 0) * item.quantity, 0),
-);
-
 function isInvalid(row) {
   return !row.sku?.title || row.sku.title === '商品已下架';
 }
+
+const validItems = computed(() => filteredItems.value.filter((item) => !isInvalid(item)));
+
+const invalidCount = computed(() => filteredItems.value.length - validItems.value.length);
+
+/** 全部已勾选的有效商品（不受当前搜索筛选影响，用于合计与结算） */
+const selectedValidItems = computed(() =>
+  items.value.filter((item) => !isInvalid(item) && selectedIds.value.includes(item.itemId)),
+);
+
+const selectedInViewCount = computed(
+  () => validItems.value.filter((item) => selectedIds.value.includes(item.itemId)).length,
+);
+
+const totalAmount = computed(() =>
+  selectedValidItems.value.reduce((sum, item) => sum + (item.sku?.price || 0) * item.quantity, 0),
+);
+
+const allValidSelected = computed(
+  () => validItems.value.length > 0 && selectedInViewCount.value === validItems.value.length,
+);
+
+const someValidSelected = computed(
+  () => selectedInViewCount.value > 0 && !allValidSelected.value,
+);
 
 function formatPrice(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
@@ -47,15 +64,58 @@ function formatSpec(specJson) {
     .join(' / ');
 }
 
-async function loadCart() {
+function syncSelectionAfterLoad(list, { selectAllIfEmpty = false } = {}) {
+  const validIdSet = new Set(
+    list.filter((item) => !isInvalid(item)).map((item) => item.itemId),
+  );
+  const kept = selectedIds.value.filter((id) => validIdSet.has(id));
+  if (kept.length > 0) {
+    selectedIds.value = kept;
+  } else if (selectAllIfEmpty) {
+    selectedIds.value = [...validIdSet];
+  } else {
+    selectedIds.value = [];
+  }
+}
+
+async function loadCart({ selectAll = false } = {}) {
   loading.value = true;
   try {
     items.value = await fetchCartItems();
+    syncSelectionAfterLoad(items.value, { selectAllIfEmpty: selectAll });
   } catch (e) {
     ElMessage.error(e.message || '加载购物车失败');
     items.value = [];
+    selectedIds.value = [];
   } finally {
     loading.value = false;
+  }
+}
+
+watch(items, (list) => {
+  const idSet = new Set(list.map((item) => item.itemId));
+  selectedIds.value = selectedIds.value.filter((id) => idSet.has(id));
+});
+
+function toggleSelectAll(checked) {
+  const viewIds = validItems.value.map((item) => item.itemId);
+  if (checked) {
+    const merged = new Set([...selectedIds.value, ...viewIds]);
+    selectedIds.value = [...merged];
+  } else {
+    const remove = new Set(viewIds);
+    selectedIds.value = selectedIds.value.filter((id) => !remove.has(id));
+  }
+}
+
+function onToggleRow(row, checked) {
+  if (isInvalid(row)) return;
+  if (checked) {
+    if (!selectedIds.value.includes(row.itemId)) {
+      selectedIds.value = [...selectedIds.value, row.itemId];
+    }
+  } else {
+    selectedIds.value = selectedIds.value.filter((id) => id !== row.itemId);
   }
 }
 
@@ -77,6 +137,7 @@ async function onRemove(row) {
   try {
     await ElMessageBox.confirm('确认删除该商品？', '提示', { type: 'warning' });
     await deleteCartItem(row.itemId);
+    selectedIds.value = selectedIds.value.filter((id) => id !== row.itemId);
     ElMessage.success('已删除');
     await loadCart();
   } catch (e) {
@@ -85,11 +146,17 @@ async function onRemove(row) {
 }
 
 function goCheckout() {
-  if (validItems.value.length === 0) {
-    ElMessage.warning('购物车没有可结算商品');
+  if (selectedValidItems.value.length === 0) {
+    ElMessage.warning('请先勾选要结算的商品');
     return;
   }
-  router.push({ name: 'checkout', query: { from: 'cart' } });
+  router.push({
+    name: 'checkout',
+    query: {
+      from: 'cart',
+      itemIds: selectedValidItems.value.map((item) => item.itemId).join(','),
+    },
+  });
 }
 
 function onSearch(keyword) {
@@ -98,7 +165,7 @@ function onSearch(keyword) {
   appliedKeyword.value = next;
 }
 
-onMounted(loadCart);
+onMounted(() => loadCart({ selectAll: true }));
 </script>
 
 <template>
@@ -135,6 +202,7 @@ onMounted(loadCart);
 
         <el-card shadow="never" class="cart-card">
           <div class="cart-header">
+            <span class="col-check" aria-hidden="true" />
             <span class="col-product">商品信息</span>
             <span class="col-price">单价</span>
             <span class="col-qty">数量</span>
@@ -148,6 +216,13 @@ onMounted(loadCart);
             class="cart-row"
             :class="{ invalid: isInvalid(row) }"
           >
+            <div class="col-check">
+              <el-checkbox
+                :model-value="selectedIds.includes(row.itemId)"
+                :disabled="isInvalid(row)"
+                @change="(checked) => onToggleRow(row, checked)"
+              />
+            </div>
             <div class="col-product product-cell">
               <div class="thumb-wrap">
                 <img
@@ -201,10 +276,18 @@ onMounted(loadCart);
 
         <div class="cart-footer">
           <div class="footer-left">
+            <el-checkbox
+              :model-value="allValidSelected"
+              :indeterminate="someValidSelected"
+              :disabled="validItems.length === 0"
+              @change="toggleSelectAll"
+            >
+              全选
+            </el-checkbox>
             <el-button link type="primary" @click="router.push({ name: 'products' })">
               继续购物
             </el-button>
-            <span class="footer-hint">已选 {{ validItems.length }} 件可结算商品</span>
+            <span class="footer-hint">已选 {{ selectedValidItems.length }} 件</span>
           </div>
           <div class="footer-right">
             <div class="total">
@@ -214,10 +297,10 @@ onMounted(loadCart);
             <el-button
               type="primary"
               size="large"
-              :disabled="validItems.length === 0"
+              :disabled="selectedValidItems.length === 0"
               @click="goCheckout"
             >
-              去结算
+              去结算{{ selectedValidItems.length > 0 ? `(${selectedValidItems.length})` : '' }}
             </el-button>
           </div>
         </div>
@@ -262,7 +345,7 @@ onMounted(loadCart);
 .cart-header,
 .cart-row {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) 110px 140px 110px 72px;
+  grid-template-columns: 36px minmax(280px, 1fr) 110px 140px 110px 72px;
   gap: 12px;
   align-items: center;
 }
@@ -290,6 +373,12 @@ onMounted(loadCart);
   margin: 0 -20px;
   padding-left: 20px;
   padding-right: 20px;
+}
+
+.col-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .col-price,
@@ -425,15 +514,21 @@ onMounted(loadCart);
   }
 
   .cart-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 36px 1fr;
     gap: 10px;
-    align-items: stretch;
+    align-items: start;
+  }
+
+  .col-check {
+    grid-row: 1 / span 5;
+    align-self: center;
   }
 
   .col-price,
   .col-qty,
   .col-subtotal,
   .col-action {
+    grid-column: 2;
     display: flex;
     align-items: center;
     justify-content: space-between;

@@ -66,10 +66,17 @@ async function loadAddresses() {
 async function loadFromCart() {
   const cart = await fetchCartItems();
   const valid = cart.filter((item) => item.sku?.title && item.sku.title !== '商品已下架');
-  if (valid.length === 0) {
-    throw new Error('购物车没有可结算商品');
+  const rawIds = String(route.query.itemIds || '')
+    .split(',')
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  const selected = rawIds.length
+    ? valid.filter((item) => rawIds.includes(item.itemId))
+    : valid;
+  if (selected.length === 0) {
+    throw new Error(rawIds.length ? '所选商品不可结算，请返回购物车重新勾选' : '购物车没有可结算商品');
   }
-  lineItems.value = valid.map((item) => ({
+  lineItems.value = selected.map((item) => ({
     skuId: item.skuId,
     quantity: item.quantity,
     title: item.sku.title,
