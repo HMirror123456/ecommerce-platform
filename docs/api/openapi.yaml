@@ -26,6 +26,8 @@ tags:
     description: 商家后台
   - name: admin
     description: 平台管理
+  - name: chat
+    description: 售后客服会话（USER_CS）
 
 paths:
   # ========== Auth ==========
@@ -1624,6 +1626,159 @@ paths:
         '200':
           description: OK
 
+  # ========== Chat (USER_CS) ==========
+  /after-sales/{afterSaleId}/chat/thread:
+    post:
+      tags: [chat]
+      summary: 用户开聊或获取已有 USER_CS 会话（幂等）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已有会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '201':
+          description: 新建会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 非本人售后
+        '404':
+          description: 售后不存在
+
+  /chat/threads:
+    get:
+      tags: [chat]
+      summary: 会话列表
+      description: 用户仅见自己的 USER_CS；CS_AGENT/SUPER_ADMIN 见全部
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, CLOSED]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  list:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatThread'
+
+  /chat/threads/{threadId}/messages:
+    get:
+      tags: [chat]
+      summary: 拉取消息（支持 afterId 增量轮询）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: threadId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: afterId
+          in: query
+          schema:
+            type: integer
+          description: 仅返回 id 大于 afterId 的消息
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  list:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatMessage'
+    post:
+      tags: [chat]
+      summary: 发送文字或订单卡片
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: threadId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendChatMessageRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+
+  /chat/threads/{threadId}/actions/{actionKey}:
+    post:
+      tags: [chat]
+      summary: 客服快捷动作
+      description: |
+        CS_APPROVE / CS_REJECT 调用售后 arbitrate；HINT_RETURN 仅写 SYSTEM 引导文案。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: threadId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: actionKey
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ChatActionKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    $ref: '#/components/schemas/ChatMessage'
+                  afterSale:
+                    type: object
+                    description: 动作影响售后时返回
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1632,6 +1787,81 @@ components:
       bearerFormat: JWT
 
   schemas:
+    ChatThread:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [USER_CS]
+        afterSaleId:
+          type: integer
+        orderId:
+          type: integer
+        orderNo:
+          type: string
+        userId:
+          type: integer
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+        afterSaleStatus:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        threadId:
+          type: integer
+        senderType:
+          type: string
+          enum: [USER, CS_AGENT, SYSTEM]
+        senderId:
+          type: integer
+          nullable: true
+        msgType:
+          type: string
+          enum: [TEXT, CARD, QUICK_ACTION]
+        content:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    SendChatMessageRequest:
+      type: object
+      required: [msgType]
+      properties:
+        msgType:
+          type: string
+          enum: [TEXT, CARD]
+        content:
+          type: string
+          description: TEXT 时必填
+        payload:
+          type: object
+          description: CARD 时可传自定义摘要；省略则服务端按售后生成
+
+    ChatActionKey:
+      type: string
+      enum:
+        - CS_APPROVE
+        - CS_REJECT
+        - HINT_RETURN
+
     UserRegisterRequest:
       type: object
       required: [phone, password]

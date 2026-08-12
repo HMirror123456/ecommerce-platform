@@ -108,6 +108,12 @@ erDiagram
 #### ProductAudit（商品审核记录）
 - **属性**：`id`, `spuId`, `adminId`, `approved`, `reason`, `auditedAt`
 
+#### ChatThread / ChatMessage（售后沟通）
+- 详见 [`CHAT.md`](CHAT.md)
+- **本次实现**：`ChatThread.type = USER_CS`（用户 ↔ 平台客服）
+- **仅文档预留**：`USER_MERCHANT`（用户 ↔ 商家），不实现代码
+- **不变式**：同一 `afterSaleId` + `type` 至多一条 `OPEN` 会话；聊天快捷动作须走已有售后 API，不得绕过状态机
+
 ---
 
 ## 3. 订单状态机
@@ -254,8 +260,10 @@ stateDiagram-v2
 | payments | 支付记录 | 组长 |
 | shipments | 物流 | 成员 B |
 | after_sales | 售后 | 组长（API）/ A+B 协作 |
+| chat_threads | 售后会话（USER_CS 已实现；USER_MERCHANT 预留） | 组长 |
+| chat_messages | 会话消息 | 组长 |
 | admins | 平台管理员 | 组长 |
 | product_audits | 商品审核记录 | 组长 |
 | merchant_audits | 商家审核记录 | 组长 |
 
-**Migration 合并顺序：** users → merchants/shops/categories/spus/skus/stocks → orders → after_sales
+**Migration 合并顺序：** users → merchants/shops/categories/spus/skus/stocks → orders → after_sales → chat_*

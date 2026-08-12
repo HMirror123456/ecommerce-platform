@@ -12,6 +12,7 @@
 | 工作台待办数 | P1 | 展示待审商品数、待仲裁售后数 | 审核/售后 API 就绪 | ✅ |
 | 全平台订单查询 | P1 | 按订单号/用户/商家/状态筛选 | 订单数据已有 | ✅ |
 | 售后仲裁 | P1 | 处理 `ESCALATED` 工单，裁定同意/拒绝 | A 申请 + B 超时未审 | ✅ |
+| 售后客服会话 | P1 | 用户↔平台文字/卡片/快捷仲裁（见 CHAT.md） | 售后升级 / 仲裁 API | ✅ |
 | 商家入驻审核 | P1 | 审核入驻申请（可简化表单） | B 提交入驻 | ✅ MySQL 持久化 |
 | 类目管理 | P2 | 维护类目树（时间不够可只读） | B 提供类目 API | ⬜ |
 
@@ -32,6 +33,7 @@
 | 申请退款/售后 | ✓ | — | — | — | — |
 | 审核售后（48h 内） | — | ✓ | — | — | — |
 | 售后仲裁（超时/申诉） | — | — | — | ✓ | ✓ |
+| 售后客服会话 | ✓ 用户侧 | — | — | ✓ | ✓ |
 | 商品上架审核 | — | 提交 | ✓ | — | ✓ |
 | 商家入驻审核 | — | 提交 | ✓ | — | ✓ |
 | 全平台订单查询 | 自己的 | 本店 | ✓ | ✓ | ✓ |
@@ -113,6 +115,7 @@ sequenceDiagram
 | `/dashboard` | 工作台 | P1 | 统计卡片、快捷入口、待办预览（按角色） |
 | `/orders` | 订单查询 | P1 | 筛选+详情，只读；OPERATOR / CS_AGENT / SUPER_ADMIN |
 | `/after-sales` | 售后仲裁 | P1 | Tab：待仲裁 / 已完成；CS_AGENT / SUPER_ADMIN |
+| `/chat` | 售后会话 | P1 | 用户↔平台客服会话列表+聊天窗；见 [`CHAT.md`](CHAT.md) |
 | `/audit/merchants` | 商家审核 | P1 | 入驻申请列表 |
 | `/categories` | 类目管理 | P2 | 树形编辑或只读 |
 
@@ -135,6 +138,11 @@ sequenceDiagram
 | GET | `/admin/orders/{orderId}` | OPERATOR, CS_AGENT, SUPER_ADMIN | 订单详情 |
 | GET | `/admin/after-sales` | CS_AGENT, SUPER_ADMIN | 售后列表 |
 | POST | `/admin/after-sales/{id}/arbitrate` | CS_AGENT, SUPER_ADMIN | 平台裁定 |
+| GET | `/chat/threads` | CS_AGENT, SUPER_ADMIN, 用户 | 售后会话列表（USER_CS） |
+| GET | `/chat/threads/{id}/messages` | 会话参与方 | 消息列表（可 afterId 增量） |
+| POST | `/chat/threads/{id}/messages` | 会话参与方 | 发文字/卡片 |
+| POST | `/chat/threads/{id}/actions/{key}` | CS_AGENT, SUPER_ADMIN | 快捷仲裁/引导寄回 |
+| POST | `/after-sales/{id}/chat/thread` | 用户 | 开聊/取已有 USER_CS 会话 |
 | GET | `/admin/merchants/pending` | OPERATOR, SUPER_ADMIN | 待审核商家（P1） |
 | POST | `/admin/merchants/{id}/audit` | OPERATOR, SUPER_ADMIN | 商家审核（P1） |
 | GET | `/admin/admins` | SUPER_ADMIN | 管理员账号列表（role/status/keyword） |
