@@ -38,6 +38,10 @@ function logout() {
           <el-icon><Service /></el-icon>
           <span>售后处理</span>
         </el-menu-item>
+        <el-menu-item index="/chats">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>用户沟通</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

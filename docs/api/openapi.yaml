@@ -1701,6 +1701,8 @@ paths:
     post:
       tags: [chat]
       summary: 用户开聊或获取已有 USER_CS 会话（幂等）
+      description: |
+        已有 OPEN 直接返回。新建仅当售后为 ESCALATED（请先申请平台介入）。
       security:
         - bearerAuth: []
       parameters:
@@ -1726,6 +1728,8 @@ paths:
           description: 非本人售后
         '404':
           description: 售后不存在
+        '409':
+          description: 售后未升级，不允许新建客服会话
 
   /after-sales/{afterSaleId}/merchant-chat/thread:
     post:
@@ -1733,8 +1737,8 @@ paths:
       summary: 开聊或获取已有售后 USER_MERCHANT 会话（幂等）
       description: |
         用户对本人售后开聊；商家对本店售后开聊/取会话。
-        建议售后状态为 APPLIED 时新建；已有 OPEN 会话可直接返回。
-      summary: 用户开聊或获取已有 USER_MERCHANT 会话（幂等）
+        已有 OPEN 会话直接返回。用户新建允许 APPLIED/REJECTED/APPROVED/RETURNING；
+        商家可在 APPLIED/APPROVED/RETURNING/REJECTED/ESCALATED/REFUNDED 新建或进入。
       security:
         - bearerAuth: []
       parameters:

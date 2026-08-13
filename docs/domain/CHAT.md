@@ -39,7 +39,7 @@
 
 | 规则 | 说明 |
 |------|------|
-| 开聊 | 用户对售后调用 `POST /after-sales/{id}/chat/thread` 幂等创建或返回已有 OPEN 会话；「申请平台介入」成功后自动建会话 |
+| 开聊 | 用户对售后调用 `POST /after-sales/{id}/chat/thread`：已有 OPEN 直接返回；**新建仅 `ESCALATED`**（与「联系平台客服」一致）；「申请平台介入」成功后自动建会话 |
 | 一人一单 | 同一 `afterSaleId` 仅一条 OPEN 的 `USER_CS` |
 | 鉴权 | 用户仅本人会话；`CS_AGENT`/`SUPER_ADMIN` 可进全部 `USER_CS` |
 | 传输 | HTTP 发消息 + 客户端 3–5s 轮询 `messages?afterId=`；无 WebSocket |
@@ -84,7 +84,7 @@
 
 | 规则 | 说明 |
 |------|------|
-| 售后开聊 | `POST /after-sales/{id}/merchant-chat/thread`；建议 `APPLIED` 时可新建 |
+| 售后开聊 | `POST /after-sales/{id}/merchant-chat/thread`（及商家 `POST /merchant/after-sales/{id}/chat/thread`）；已有 OPEN 直接返回。用户新建允许 `APPLIED`/`REJECTED`/`APPROVED`/`RETURNING`（寄回阶段可问物流/地址）；商家可在 `APPLIED`/`APPROVED`/`RETURNING`/`REJECTED`/`ESCALATED`/`REFUNDED` 新建或进入。`ESCALATED`/`REFUNDED` 时商家发消息被服务端拒绝 |
 | 订单开聊 | `POST /orders/{orderId}/merchant-chat/thread`（body: `merchantId` 或 `subOrderId`）；订单属本人且目标子单/整单为待发货等可沟通状态 |
 | 鉴权 | 用户仅本人；商家仅本店 `merchantId` 匹配的会话 |
 | 传输 | 与 USER_CS 相同：HTTP + `afterId` 轮询 |
@@ -107,7 +107,7 @@
 | 端 | 入口 | 负责人 |
 |----|------|--------|
 | web-user | 订单详情「履约信息」待发货店铺旁「联系商家」；售后区「联系商家」 | 成员 A |
-| web-merchant | 会话列表/售后详情「回复用户」 | 成员 B |
+| web-merchant | 侧栏「用户沟通」会话列表（含订单级）；售后列表「回复用户」 | 成员 B |
 
 ### 2.6 非目标
 

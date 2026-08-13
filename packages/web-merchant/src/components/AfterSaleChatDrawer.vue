@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   fetchMerchantChatMessages,
@@ -10,6 +10,8 @@ import {
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   afterSaleId: { type: Number, default: null },
+  /** 订单级等无售后会话：直接传入列表中的 thread */
+  initialThread: { type: Object, default: null },
 });
 const emit = defineEmits(['update:modelValue']);
 
@@ -33,6 +35,10 @@ const TYPE_LABELS = {
   REFUND_ONLY: '仅退款',
   RETURN_REFUND: '退货退款',
 };
+
+const isOrderThread = computed(() => Boolean(thread.value && !thread.value.afterSaleId));
+
+const drawerTitle = computed(() => (isOrderThread.value ? '订单沟通' : '回复用户'));
 
 function formatTime(iso) {
   if (!iso) return '';
@@ -71,6 +77,14 @@ function readOnlyHint() {
   return '';
 }
 
+function metaLine() {
+  if (!thread.value) return '';
+  if (thread.value.afterSaleId) {
+    return `订单 ${thread.value.orderNo} · 售后 #${thread.value.afterSaleId} · ${statusLabel(thread.value.afterSaleStatus)}`;
+  }
+  return `订单 ${thread.value.orderNo} · 订单沟通`;
+}
+
 async function loadMessages(reset) {
   if (!thread.value) return;
   try {
@@ -88,10 +102,17 @@ async function loadMessages(reset) {
 }
 
 async function openThread() {
-  if (!props.afterSaleId) return;
   loading.value = true;
   try {
-    thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
+    if (props.afterSaleId) {
+      thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
+    } else if (props.initialThread?.id) {
+      thread.value = props.initialThread;
+    } else {
+      ElMessage.warning('缺少会话信息');
+      emit('update:modelValue', false);
+      return;
+    }
     await loadMessages(true);
     startPoll();
   } catch (e) {
@@ -152,15 +173,13 @@ onUnmounted(stopPoll);
 <template>
   <el-drawer
     :model-value="modelValue"
-    title="回复用户"
+    :title="drawerTitle"
     size="400px"
     @close="onClose"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div v-loading="loading" class="drawer-body">
-      <div v-if="thread" class="thread-meta">
-        订单 {{ thread.orderNo }} · 售后 #{{ thread.afterSaleId }} · {{ statusLabel(thread.afterSaleStatus) }}
-      </div>
+      <div v-if="thread" class="thread-meta">{{ metaLine() }}</div>
       <div id="merchant-chat-scroll" class="msg-list">
         <el-empty v-if="!loading && !messages.length" description="暂无沟通消息" :image-size="72" />
         <div
@@ -172,12 +191,18 @@ onUnmounted(stopPoll);
           <div class="bubble">
             <div class="who">{{ senderLabel(message) }} · {{ formatTime(message.createdAt) }}</div>
             <div v-if="message.msgType === 'CARD'" class="card">
-              <div class="card-title">订单与售后摘要</div>
+              <div class="card-title">{{ isOrderThread ? '订单摘要' : '订单与售后摘要' }}</div>
               <div>订单号：{{ message.payload && message.payload.orderNo }}</div>
-              <div>售后状态：{{ statusLabel(message.payload && message.payload.status) }}</div>
-              <div>售后类型：{{ typeLabel(message.payload && message.payload.type) }}</div>
-              <div>退款金额：¥{{ Number(message.payload && message.payload.amount || 0).toFixed(2) }}</div>
-              <div class="muted">申请原因：{{ message.payload && message.payload.reason }}</div>
+              <template v-if="message.payload && message.payload.afterSaleId">
+                <div>售后状态：{{ statusLabel(message.payload && message.payload.status) }}</div>
+                <div>售后类型：{{ typeLabel(message.payload && message.payload.type) }}</div>
+                <div>退款金额：¥{{ Number(message.payload && message.payload.amount || 0).toFixed(2) }}</div>
+                <div class="muted">申请原因：{{ message.payload && message.payload.reason }}</div>
+              </template>
+              <template v-else>
+                <div v-if="message.payload && message.payload.shopName">店铺：{{ message.payload.shopName }}</div>
+                <div v-if="message.payload && message.payload.status">子单状态：{{ message.payload.status }}</div>
+              </template>
             </div>
             <div v-else class="text">{{ message.content }}</div>
           </div>
@@ -189,7 +214,7 @@ onUnmounted(stopPoll);
           v-model="draft"
           type="textarea"
           :rows="2"
-          placeholder="回复用户的售后问题…"
+          :placeholder="isOrderThread ? '回复用户的订单咨询…' : '回复用户的售后问题…'"
           :disabled="isReadOnlyThread()"
           @keydown.ctrl.enter="onSend"
         />

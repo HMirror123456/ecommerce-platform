@@ -321,10 +321,13 @@ function escalateButtonLabel(afterSale) {
 
 function escalateHint(afterSale) {
   if (afterSale.status === 'REJECTED') {
-    return '商家已拒绝本次售后，可升级由平台客服仲裁。';
+    return '建议先联系商家协商；仍无法解决可申请平台介入。';
   }
   if (afterSale.status === 'APPLIED') {
-    return '商家需在 48 小时内处理；超时或协商不成可申请平台介入。';
+    return '建议先联系商家协商。商家需在 48 小时内处理；超时或协商不成可申请平台介入。';
+  }
+  if (afterSale.status === 'APPROVED' || afterSale.status === 'RETURNING') {
+    return '寄回相关问题可联系商家确认地址或物流进度。';
   }
   return '';
 }
@@ -488,8 +491,8 @@ async function onEscalate(afterSale) {
   try {
     await ElMessageBox.confirm(
       afterSale.status === 'REJECTED'
-        ? '商家已拒绝售后，确认申请平台介入并由客服仲裁？'
-        : '确认申请平台介入？适用于商家超时未处理或协商不成的情况。',
+        ? '商家已拒绝售后。建议先通过「联系商家协商」沟通；仍无法解决再申请平台介入，由客服仲裁。'
+        : '建议先通过「联系商家协商」沟通。商家超时未处理或协商不成时，再申请平台介入。',
       '申请平台介入',
       { type: 'warning' },
     );
@@ -511,7 +514,14 @@ function canContactCs(afterSale) {
 }
 
 function canContactMerchant(afterSale) {
-  return afterSale?.status === 'APPLIED';
+  return ['APPLIED', 'REJECTED', 'APPROVED', 'RETURNING'].includes(afterSale?.status);
+}
+
+function merchantChatButtonLabel(afterSale) {
+  if (afterSale?.status === 'APPROVED' || afterSale?.status === 'RETURNING') {
+    return '联系商家';
+  }
+  return '联系商家协商';
 }
 
 function canContactShop(sub) {
@@ -782,7 +792,7 @@ onUnmounted(() => {
               size="small"
               @click="openMerchantChatDrawer(as)"
             >
-              联系商家协商
+              {{ merchantChatButtonLabel(as) }}
             </el-button>
             <el-button
               v-if="canEscalate(as)"

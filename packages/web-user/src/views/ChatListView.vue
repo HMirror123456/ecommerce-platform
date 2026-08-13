@@ -1,9 +1,10 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { nextTick, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { ChatDotRound, Shop } from '@element-plus/icons-vue';
 import { fetchChatThreads } from '@/api/chat';
+import { escalateAfterSale } from '@/api/order';
 import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
 
 const AFTER_SALE_STATUS_LABELS = {
@@ -94,14 +95,33 @@ function openChat(row) {
   chatVisible.value = true;
 }
 
-function onEscalateFromList() {
-  chatVisible.value = false;
-  if (chatOrderId.value) {
-    router.push({ name: 'order-detail', params: { orderId: chatOrderId.value } });
-    ElMessage.info('请在订单详情中点击「申请平台介入」');
+async function onEscalateFromList() {
+  const afterSaleId = chatAfterSaleId.value;
+  const orderId = chatOrderId.value;
+  if (!afterSaleId || !orderId) {
+    ElMessage.warning('缺少售后或订单信息，无法申请平台介入');
     return;
   }
-  router.push({ name: 'user-orders' });
+  try {
+    await ElMessageBox.confirm(
+      '建议先与商家协商。商家超时未处理或协商不成时，再申请平台介入，由客服仲裁。',
+      '申请平台介入',
+      { type: 'warning' },
+    );
+    await escalateAfterSale(orderId, afterSaleId);
+    ElMessage.success('已申请平台介入，已为您打开平台客服会话');
+    chatVisible.value = false;
+    chatCanEscalate.value = false;
+    chatThreadType.value = 'USER_CS';
+    chatMerchantId.value = null;
+    chatAfterSaleId.value = afterSaleId;
+    chatOrderId.value = orderId;
+    await nextTick();
+    chatVisible.value = true;
+    await loadThreads();
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '升级失败');
+  }
 }
 
 function goOrder(row) {
@@ -192,9 +212,12 @@ onMounted(loadThreads);
             </span>
           </div>
           <p class="meta">
-            售后 #{{ row.afterSaleId }}
+            <template v-if="row.afterSaleId">
+              售后 #{{ row.afterSaleId }}
+              <template v-if="row.afterSaleStatus"> · {{ afterSaleLabel(row.afterSaleStatus) }}</template>
+            </template>
+            <template v-else>订单沟通</template>
             <template v-if="row.shopName"> · {{ row.shopName }}</template>
-            · {{ afterSaleLabel(row.afterSaleStatus) }}
           </p>
           <p class="time">更新于 {{ formatTime(row.updatedAt) }}</p>
         </div>
