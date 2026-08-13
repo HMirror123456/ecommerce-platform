@@ -15,10 +15,11 @@ function mapThread(row) {
   return {
     id: row.id,
     type: row.type,
-    afterSaleId: row.after_sale_id,
+    afterSaleId: row.after_sale_id == null ? null : row.after_sale_id,
     orderId: row.order_id,
     orderNo: row.order_no,
     userId: row.user_id,
+    merchantId: row.merchant_id == null ? null : row.merchant_id,
     status: row.status,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
@@ -47,17 +48,35 @@ export async function findOpenThreadByAfterSale(afterSaleId, type = 'USER_CS') {
   return mapThread(rows[0]);
 }
 
+export async function findOpenThreadByOrderMerchant(orderId, merchantId, type = 'USER_MERCHANT') {
+  const [rows] = await pool.query(
+    `SELECT * FROM chat_threads
+     WHERE order_id = ? AND merchant_id = ? AND type = ? AND after_sale_id IS NULL AND status = 'OPEN'
+     LIMIT 1`,
+    [orderId, merchantId, type],
+  );
+  return mapThread(rows[0]);
+}
+
 export async function findThreadById(threadId) {
   const [rows] = await pool.query('SELECT * FROM chat_threads WHERE id = ? LIMIT 1', [threadId]);
   return mapThread(rows[0]);
 }
 
-export async function createThread({ afterSaleId, orderId, orderNo, userId, type = 'USER_CS' }) {
+export async function createThread({
+  afterSaleId = null,
+  orderId,
+  orderNo,
+  userId,
+  merchantId = null,
+  type = 'USER_CS',
+}) {
   const now = toMysqlDateTime(new Date());
   const [result] = await pool.query(
-    `INSERT INTO chat_threads (type, after_sale_id, order_id, order_no, user_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?)`,
-    [type, afterSaleId, orderId, orderNo, userId, now, now],
+    `INSERT INTO chat_threads (
+      type, after_sale_id, order_id, order_no, user_id, merchant_id, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?)`,
+    [type, afterSaleId, orderId, orderNo, userId, merchantId, now, now],
   );
   return findThreadById(result.insertId);
 }
@@ -69,6 +88,13 @@ export async function touchThread(threadId) {
   ]);
 }
 
+export async function listThreadsForUser(userId, { status, type } = {}) {
+  const params = [userId];
+  let sql = `SELECT * FROM chat_threads WHERE user_id = ?`;
+  if (type) {
+    sql += ' AND type = ?';
+    params.push(type);
+  }
 export async function listThreadsForUser(userId, { status, type = 'USER_CS' } = {}) {
   const params = [userId, type];
   let sql = 'SELECT * FROM chat_threads WHERE user_id = ? AND type = ?';
@@ -104,6 +130,25 @@ export async function listThreadsForCs({ status } = {}) {
     params.push(status);
   }
   sql += ' ORDER BY updated_at DESC';
+  const [rows] = await pool.query(sql, params);
+  return rows.map(mapThread);
+}
+
+/** 商家侧：本店售后会话 + 订单级会话 */
+export async function listThreadsForMerchant(merchantId, { status } = {}) {
+  const params = [merchantId, merchantId];
+  let sql = `
+    SELECT DISTINCT t.*
+    FROM chat_threads t
+    LEFT JOIN after_sales a ON a.after_sale_id = t.after_sale_id
+    WHERE t.type = 'USER_MERCHANT'
+      AND (t.merchant_id = ? OR a.merchant_id = ?)
+  `;
+  if (status) {
+    sql += ' AND t.status = ?';
+    params.push(status);
+  }
+  sql += ' ORDER BY t.updated_at DESC';
   const [rows] = await pool.query(sql, params);
   return rows.map(mapThread);
 }

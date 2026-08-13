@@ -2,6 +2,21 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import {
+  Box,
+  Cellphone,
+  CoffeeCup,
+  Goods,
+  Headset,
+  Monitor,
+  ShoppingBag,
+  Sunny,
+  Van,
+  CircleCheck,
+  Service,
+  Timer,
+} from '@element-plus/icons-vue';
+import ProductSearchBar from '@/components/ProductSearchBar.vue';
 import { fetchCategories, fetchProductList } from '@/api/product';
 
 const route = useRoute();
@@ -10,12 +25,65 @@ const router = useRouter();
 const loading = ref(false);
 const categories = ref([]);
 const products = ref([]);
+const hotProducts = ref([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(12);
 const activeCategoryId = ref(null);
+const searchKeyword = ref('');
+
+const CATEGORY_ICONS = [Headset, Monitor, Sunny, Goods, ShoppingBag, Cellphone, CoffeeCup, Box];
+
+const banners = [
+  {
+    key: 'digital',
+    title: '数码好物季',
+    desc: '耳机 · 键鼠 · 外设一站购齐',
+    image: 'https://picsum.photos/seed/mall-banner-digital/1200/360',
+    keyword: '耳机',
+  },
+  {
+    key: 'home',
+    title: '家居生活馆',
+    desc: '灯光氛围，提升日常质感',
+    image: 'https://picsum.photos/seed/mall-banner-home/1200/360',
+    keyword: '台灯',
+  },
+  {
+    key: 'service',
+    title: '安心购演示链路',
+    desc: 'Mock 支付 · 拆单发货 · 售后可介入',
+    image: 'https://picsum.photos/seed/mall-banner-service/1200/360',
+    keyword: '',
+  },
+];
+
+const serviceItems = [
+  { icon: CircleCheck, title: '正品保障', desc: '商家上架需平台审核' },
+  { icon: Van, title: '多店合单', desc: '一单多商家拆单履约' },
+  { icon: Timer, title: '7 天自动确认', desc: '发货后可手动/自动收货' },
+  { icon: Service, title: '售后可追溯', desc: '商家处理与平台介入' },
+];
+
+const showHomeChrome = computed(() => !searchKeyword.value);
+
+const showHotFloor = computed(
+  () => !searchKeyword.value && activeCategoryId.value == null && hotProducts.value.length > 0,
+);
+
+const categoryEntries = computed(() => {
+  const list = [];
+  for (const root of categories.value || []) {
+    list.push({ id: root.id, name: root.name });
+    for (const child of root.children || []) {
+      list.push({ id: child.id, name: child.name });
+    }
+  }
+  return list.slice(0, 8);
+});
 
 const pageTitle = computed(() => {
+  if (searchKeyword.value) return `搜索「${searchKeyword.value}」`;
   if (activeCategoryId.value == null) return '全部商品';
   return findCategoryName(categories.value, activeCategoryId.value) || '商品列表';
 });
@@ -27,6 +95,10 @@ function findCategoryName(nodes, id) {
     if (child) return child;
   }
   return null;
+}
+
+function categoryIcon(index) {
+  return CATEGORY_ICONS[index % CATEGORY_ICONS.length];
 }
 
 function splitPrice(value) {
@@ -42,6 +114,18 @@ function parseCategoryFromRoute() {
   return Number.isInteger(id) ? id : null;
 }
 
+function parseKeywordFromRoute() {
+  const raw = route.query.keyword ?? route.query.q;
+  return raw == null ? '' : String(raw).trim();
+}
+
+function buildProductsQuery({ categoryId, keyword } = {}) {
+  const query = {};
+  if (categoryId != null) query.categoryId = String(categoryId);
+  if (keyword) query.keyword = keyword;
+  return query;
+}
+
 async function loadCategories() {
   try {
     categories.value = await fetchCategories();
@@ -51,12 +135,24 @@ async function loadCategories() {
   }
 }
 
+async function loadHotProducts() {
+  try {
+    const data = await fetchProductList({ page: 1, pageSize: 8 });
+    hotProducts.value = data.list || [];
+  } catch {
+    hotProducts.value = [];
+  }
+}
+
 async function loadProducts() {
   loading.value = true;
   try {
     const params = { page: page.value, pageSize: pageSize.value };
     if (activeCategoryId.value != null) {
       params.categoryId = activeCategoryId.value;
+    }
+    if (searchKeyword.value) {
+      params.keyword = searchKeyword.value;
     }
     const data = await fetchProductList(params);
     products.value = data.list || [];
@@ -76,8 +172,34 @@ function selectCategory(categoryId) {
   activeCategoryId.value = nextId;
   router.replace({
     name: 'products',
-    query: nextId == null ? {} : { categoryId: String(nextId) },
+    query: buildProductsQuery({ categoryId: nextId, keyword: searchKeyword.value }),
   });
+}
+
+function onSearch(keyword) {
+  const next = String(keyword || '').trim();
+  page.value = 1;
+  searchKeyword.value = next;
+  router.replace({
+    name: 'products',
+    query: buildProductsQuery({ categoryId: activeCategoryId.value, keyword: next }),
+  });
+}
+
+function onBannerClick(banner) {
+  page.value = 1;
+  if (banner.keyword) {
+    searchKeyword.value = banner.keyword;
+    activeCategoryId.value = null;
+    router.replace({
+      name: 'products',
+      query: buildProductsQuery({ keyword: banner.keyword }),
+    });
+    return;
+  }
+  searchKeyword.value = '';
+  activeCategoryId.value = null;
+  router.replace({ name: 'products', query: {} });
 }
 
 function onPageChange(nextPage) {
@@ -90,9 +212,10 @@ function goDetail(spuId) {
 }
 
 watch(
-  () => route.query.categoryId,
+  () => [route.query.categoryId, route.query.keyword, route.query.q],
   () => {
     activeCategoryId.value = parseCategoryFromRoute();
+    searchKeyword.value = parseKeywordFromRoute();
     page.value = 1;
     loadProducts();
   },
@@ -100,16 +223,99 @@ watch(
 
 onMounted(async () => {
   activeCategoryId.value = parseCategoryFromRoute();
+  searchKeyword.value = parseKeywordFromRoute();
   await loadCategories();
-  await loadProducts();
+  await Promise.all([loadProducts(), loadHotProducts()]);
 });
 </script>
 
 <template>
   <div class="product-list-page">
+    <!-- 1. 轮播 Banner -->
+    <section v-if="showHomeChrome" class="home-carousel-wrap">
+      <el-carousel height="280px" :interval="4500" arrow="hover" indicator-position="outside">
+        <el-carousel-item v-for="banner in banners" :key="banner.key">
+          <button type="button" class="banner-slide" @click="onBannerClick(banner)">
+            <img :src="banner.image" :alt="banner.title" class="banner-image" loading="lazy" />
+            <div class="banner-mask">
+              <p class="banner-kicker">精选活动</p>
+              <h2 class="banner-title">{{ banner.title }}</h2>
+              <p class="banner-desc">{{ banner.desc }}</p>
+              <span class="banner-cta">去看看</span>
+            </div>
+          </button>
+        </el-carousel-item>
+      </el-carousel>
+    </section>
+
+    <!-- 2. 分类图标行 -->
+    <section v-if="showHomeChrome && categoryEntries.length" class="category-icons">
+      <button
+        v-for="(item, index) in categoryEntries"
+        :key="item.id"
+        type="button"
+        class="category-icon-item"
+        :class="{ active: activeCategoryId === item.id }"
+        @click="selectCategory(item.id)"
+      >
+        <span class="icon-circle">
+          <el-icon :size="22"><component :is="categoryIcon(index)" /></el-icon>
+        </span>
+        <span class="icon-label">{{ item.name }}</span>
+      </button>
+    </section>
+
+    <!-- 3. 服务保障条 -->
+    <section v-if="showHomeChrome" class="service-strip">
+      <div v-for="item in serviceItems" :key="item.title" class="service-item">
+        <el-icon class="service-icon" :size="18"><component :is="item.icon" /></el-icon>
+        <div>
+          <p class="service-title">{{ item.title }}</p>
+          <p class="service-desc">{{ item.desc }}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 热销推荐 -->
+    <section v-if="showHotFloor" class="hot-floor">
+      <div class="floor-header">
+        <h2 class="floor-title">热销推荐</h2>
+        <p class="floor-subtitle">精选上架好物，点击直达详情</p>
+      </div>
+      <div class="hot-grid">
+        <article
+          v-for="item in hotProducts"
+          :key="`hot-${item.spuId}`"
+          class="product-card hot-card"
+          @click="goDetail(item.spuId)"
+        >
+          <div class="product-image-wrap">
+            <img :src="item.mainImage" :alt="item.title" class="product-image" loading="lazy" />
+            <span class="hot-badge">热销</span>
+          </div>
+          <div class="product-body">
+            <h3 class="product-title">{{ item.title }}</h3>
+            <div class="product-price">
+              <span class="price-symbol">¥</span>
+              <span class="price-integer">{{ splitPrice(item.minPrice).integer }}</span>
+              <span class="price-decimal">.{{ splitPrice(item.minPrice).decimal }}</span>
+              <span class="price-suffix">起</span>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
     <div class="page-header">
-      <h1 class="page-title">{{ pageTitle }}</h1>
-      <p class="page-subtitle">按分类浏览，精选好物</p>
+      <div class="header-top">
+        <div>
+          <h1 class="page-title">{{ pageTitle }}</h1>
+          <p class="page-subtitle">
+            {{ searchKeyword ? '根据关键词筛选上架商品' : '左侧选分类，顶栏可随时搜索' }}
+          </p>
+        </div>
+        <ProductSearchBar v-model="searchKeyword" @search="onSearch" />
+      </div>
     </div>
 
     <div class="content-layout">
@@ -160,7 +366,10 @@ onMounted(async () => {
           </div>
         </div>
 
-        <el-empty v-else-if="products.length === 0" description="该分类下暂无上架商品" />
+        <el-empty
+          v-else-if="products.length === 0"
+          :description="searchKeyword ? '没有找到相关商品' : '该分类下暂无上架商品'"
+        />
 
         <div v-else class="product-grid">
           <article
@@ -205,8 +414,227 @@ onMounted(async () => {
   padding-bottom: 32px;
 }
 
+.home-carousel-wrap {
+  margin-bottom: 16px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--border-color);
+}
+
+.banner-slide {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 280px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  background: #f5f5f5;
+}
+
+.banner-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scale(1.02);
+  transition: transform 0.45s ease;
+}
+
+.banner-slide:hover .banner-image {
+  transform: scale(1.06);
+}
+
+.banner-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 32px 40px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.2) 55%, transparent 100%);
+  color: #fff;
+}
+
+.banner-kicker {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  opacity: 0.9;
+}
+
+.banner-title {
+  margin: 0 0 8px;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.banner-desc {
+  margin: 0 0 16px;
+  font-size: 14px;
+  opacity: 0.92;
+}
+
+.banner-cta {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 8px 16px;
+  border-radius: 4px;
+  background: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.category-icons {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 16px 12px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.category-icon-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 8px 4px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.category-icon-item:hover,
+.category-icon-item.active {
+  background: #fff1f0;
+}
+
+.icon-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff1f0;
+  color: var(--color-primary);
+}
+
+.category-icon-item.active .icon-circle {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.icon-label {
+  font-size: 12px;
+  color: var(--text-body);
+  line-height: 1.3;
+  text-align: center;
+}
+
+.service-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.service-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.service-icon {
+  color: var(--color-primary);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.service-title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-title);
+}
+
+.service-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.hot-floor {
+  margin-bottom: 24px;
+}
+
+.floor-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.floor-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-title);
+}
+
+.floor-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.hot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.hot-card .product-image-wrap {
+  position: relative;
+}
+
+.hot-badge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #fff;
+  background: var(--color-primary);
+  border-radius: 0 0 8px 0;
+}
+
 .page-header {
   margin-bottom: 24px;
+}
+
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .page-title {
@@ -227,12 +655,6 @@ onMounted(async () => {
   grid-template-columns: 220px 1fr;
   gap: 20px;
   align-items: start;
-}
-
-@media (max-width: 768px) {
-  .content-layout {
-    grid-template-columns: 1fr;
-  }
 }
 
 .category-panel {
@@ -280,11 +702,7 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.category-item:hover {
-  background: #fff1f0;
-  color: var(--color-primary);
-}
-
+.category-item:hover,
 .category-item.active {
   background: #fff1f0;
   color: var(--color-primary);
@@ -295,18 +713,6 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
-}
-
-@media (max-width: 992px) {
-  .product-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 768px) {
-  .product-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 .product-card {
@@ -416,5 +822,48 @@ onMounted(async () => {
   display: flex;
   justify-content: center;
   margin-top: 32px;
+}
+
+@media (max-width: 992px) {
+  .hot-grid,
+  .product-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .category-icons {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .service-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .content-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .banner-slide,
+  .home-carousel-wrap :deep(.el-carousel),
+  .home-carousel-wrap :deep(.el-carousel__container) {
+    height: 200px !important;
+  }
+
+  .banner-mask {
+    padding: 20px;
+  }
+
+  .banner-title {
+    font-size: 22px;
+  }
+
+  .category-icons {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .service-strip {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 </style>

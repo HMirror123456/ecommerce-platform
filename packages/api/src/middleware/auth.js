@@ -116,3 +116,39 @@ export function requireUserOrCs(req, res, next) {
     }
   })();
 }
+
+/** User / Merchant / CS_AGENT|SUPER_ADMIN for USER_CS + USER_MERCHANT chat. */
+export function requireUserMerchantOrCs(req, res, next) {
+  (async () => {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) return res.status(401).json({ message: '未登录' });
+    try {
+      const payload = jwt.verify(header.slice(7), JWT_SECRET);
+      if (payload.type === 'user') {
+        const user = await findUserById(payload.sub);
+        if (!user) return res.status(401).json({ message: '账号无效' });
+        req.user = user;
+        return next();
+      }
+      if (payload.type === 'merchant') {
+        const merchant = await findMerchantById(payload.sub);
+        if (!merchant) return res.status(401).json({ message: '账号无效' });
+        req.merchant = merchant;
+        return next();
+      }
+      if (payload.type === 'admin') {
+        const admin = await findAdminById(payload.sub);
+        if (!admin) return res.status(401).json({ message: '账号无效' });
+        if (admin.status === 'DISABLED') return res.status(401).json({ message: '账号已禁用' });
+        if (admin.role !== 'SUPER_ADMIN' && admin.role !== 'CS_AGENT') {
+          return res.status(403).json({ message: '当前角色无此操作权限' });
+        }
+        req.admin = admin;
+        return next();
+      }
+      return res.status(403).json({ message: '无权限' });
+    } catch {
+      return res.status(401).json({ message: '登录已过期，请重新登录' });
+    }
+  })();
+}

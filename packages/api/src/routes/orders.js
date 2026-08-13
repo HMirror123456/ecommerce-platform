@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import {
   cancelOrder,
+  confirmOrderReceipt,
+  confirmSubOrderReceipt,
   createAfterSale,
   createOrder,
   escalateAfterSale,
@@ -72,6 +74,32 @@ router.post('/:id/cancel', requireUser, async (req, res, next) => {
   }
 });
 
+router.post('/:id/confirm-receipt', requireUser, async (req, res, next) => {
+  try {
+    const result = await confirmOrderReceipt(req.user.id, Number(req.params.id));
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    res.json({ message: '确认收货成功', order: result.order });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/sub-orders/:subOrderId/confirm-receipt', requireUser, async (req, res, next) => {
+  try {
+    const result = await confirmSubOrderReceipt(
+      req.user.id,
+      Number(req.params.id),
+      Number(req.params.subOrderId),
+    );
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    res.json({ message: '确认收货成功', order: result.order });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:id/after-sales', requireUser, async (req, res, next) => {
   try {
     const result = await createAfterSale(req.user.id, Number(req.params.id), req.body || {});
@@ -82,12 +110,14 @@ router.post('/:id/after-sales', requireUser, async (req, res, next) => {
       result.error === 'INVALID_STATE' ||
       result.error === 'ALREADY_EXISTS' ||
       result.error === 'INVALID_TYPE' ||
-      result.error === 'REASON_REQUIRED'
+      result.error === 'REASON_REQUIRED' ||
+      result.error === 'INVALID_INPUT'
     ) {
       return res.status(result.error === 'INVALID_STATE' || result.error === 'ALREADY_EXISTS' ? 409 : 400).json({
         message: result.message,
       });
     }
+    if (result.error) return res.status(400).json({ message: result.message });
     res.status(201).json(result.afterSale);
   } catch (err) {
     next(err);

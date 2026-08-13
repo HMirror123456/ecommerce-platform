@@ -130,12 +130,17 @@ function normalizeBatchSpuIds(spuIds) {
   return [...new Set(spuIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
 }
 
-export async function listPublicProducts({ page = 1, pageSize = 20, categoryIds } = {}) {
+export async function listPublicProducts({ page = 1, pageSize = 20, categoryIds, keyword } = {}) {
   const where = ['status = ?'];
   const params = ['ON_SHELF'];
   if (Array.isArray(categoryIds) && categoryIds.length) {
     where.push(`category_id IN (${categoryIds.map(() => '?').join(',')})`);
     params.push(...categoryIds);
+  }
+  const q = String(keyword || '').trim();
+  if (q) {
+    where.push('title LIKE ?');
+    params.push(`%${q}%`);
   }
 
   const [countRows] = await pool.query(

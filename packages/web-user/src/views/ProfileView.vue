@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { Plus } from '@element-plus/icons-vue';
 import { fetchProfile, updateProfile } from '@/api/user';
 import { useAuthStore } from '@/stores/auth';
 
@@ -8,13 +9,16 @@ const auth = useAuthStore();
 
 const loading = ref(false);
 const saving = ref(false);
-const profile = ref({ userId: null, phone: '', nickname: '' });
+const avatarSaving = ref(false);
+const profile = ref({ userId: null, phone: '', nickname: '', avatarUrl: null });
 const form = ref({
   nickname: '',
   currentPassword: '',
   newPassword: '',
   confirmPassword: '',
 });
+
+const AVATAR_MAX_BYTES = 200 * 1024;
 
 async function loadProfile() {
   loading.value = true;
@@ -78,6 +82,55 @@ async function onSavePassword() {
   }
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('读取图片失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function onBeforeAvatarUpload(file) {
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (!allowed.includes(file.type)) {
+    ElMessage.warning('仅支持 JPG / PNG / GIF / WEBP 图片');
+    return false;
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    ElMessage.warning('头像请控制在 200KB 以内');
+    return false;
+  }
+
+  avatarSaving.value = true;
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const data = await updateProfile({ avatarUrl: dataUrl });
+    profile.value = data;
+    auth.setProfile(data);
+    ElMessage.success('头像已更新');
+  } catch (e) {
+    ElMessage.error(e.message || '上传头像失败');
+  } finally {
+    avatarSaving.value = false;
+  }
+  return false;
+}
+
+async function onClearAvatar() {
+  avatarSaving.value = true;
+  try {
+    const data = await updateProfile({ avatarUrl: '' });
+    profile.value = data;
+    auth.setProfile(data);
+    ElMessage.success('已恢复默认头像');
+  } catch (e) {
+    ElMessage.error(e.message || '清除头像失败');
+  } finally {
+    avatarSaving.value = false;
+  }
+}
+
 onMounted(loadProfile);
 </script>
 
@@ -88,6 +141,35 @@ onMounted(loadProfile);
     <el-card shadow="never" class="section-card">
       <template #header><span>基本资料</span></template>
       <el-form label-width="96px" style="max-width: 480px">
+        <el-form-item label="头像">
+          <div class="avatar-row">
+            <el-upload
+              class="avatar-uploader"
+              :show-file-list="false"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              :disabled="avatarSaving"
+              :before-upload="onBeforeAvatarUpload"
+            >
+              <div class="avatar-preview" :class="{ loading: avatarSaving }">
+                <img v-if="profile.avatarUrl" :src="profile.avatarUrl" alt="头像" class="avatar-img" />
+                <el-icon v-else class="avatar-plus"><Plus /></el-icon>
+              </div>
+            </el-upload>
+            <div class="avatar-actions">
+              <p class="avatar-tip">点击左侧头像更换</p>
+              <el-button
+                v-if="profile.avatarUrl"
+                link
+                type="danger"
+                :loading="avatarSaving"
+                @click="onClearAvatar"
+              >
+                恢复默认
+              </el-button>
+              <p class="hint">支持 JPG / PNG / GIF / WEBP，建议不超过 200KB</p>
+            </div>
+          </div>
+        </el-form-item>
         <el-form-item label="用户 ID">
           <el-input :model-value="profile.userId" disabled />
         </el-form-item>
@@ -137,5 +219,55 @@ onMounted(loadProfile);
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.4;
+}
+.avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.avatar-preview {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border: 1px dashed var(--border-color);
+  background: #fff1f0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.avatar-preview:hover {
+  border-color: var(--color-primary);
+}
+.avatar-preview.loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatar-plus {
+  font-size: 28px;
+  color: var(--color-primary);
+}
+.avatar-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.avatar-tip {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-body);
+}
+.avatar-uploader :deep(.el-upload) {
+  border: none;
+  background: transparent;
 }
 </style>

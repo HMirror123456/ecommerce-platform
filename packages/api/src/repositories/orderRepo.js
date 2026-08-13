@@ -331,6 +331,18 @@ export async function listExpiredPendingOrders() {
   return orders;
 }
 
+export async function listOrdersByStatus(status) {
+  const [rows] = await pool.query('SELECT order_id FROM orders WHERE status = ? ORDER BY order_id ASC', [
+    status,
+  ]);
+  const orders = [];
+  for (const row of rows) {
+    const order = await loadOrderGraph(row.order_id);
+    if (order) orders.push(order);
+  }
+  return orders;
+}
+
 export async function countOrders(status) {
   if (status) {
     const [rows] = await pool.query('SELECT COUNT(*) AS cnt FROM orders WHERE status = ?', [status]);

@@ -14,6 +14,8 @@ import * as stockRepo from '../repositories/stockRepo.js';
 import * as chatRepo from '../repositories/chatRepo.js';
 
 const ORDER_PAY_TIMEOUT_MS = 15 * 60 * 1000;
+/** 子单发货后 7 天自动确认收货 */
+const ORDER_AUTO_CONFIRM_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Legacy product fixtures; main category/product/stock flows use repository-backed MySQL data.
 export const categories = [
@@ -293,7 +295,98 @@ export async function expirePendingOrders() {
     });
     await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
   }
+  await autoConfirmShippedOrders();
   await escalateOverdueAfterSales();
+}
+
+/**
+ * 领域：SHIPPED → COMPLETED（超时自动确认收货，按子单）
+ * 每个 SHIPPED 子单独立判断 shippedAt + ORDER_AUTO_CONFIRM_MS
+ */
+export async function autoConfirmShippedOrders() {
+  const candidates = await orderRepo.listOrdersByStatus('SHIPPED');
+  // 部分发货时主单也可能仍是 PENDING_SHIPMENT？当前发货逻辑会把主单置 SHIPPED。
+  // 另扫 PENDING_SHIPMENT 以防历史数据：有子单已发货但主单未升态
+  const pendingShip = await orderRepo.listOrdersByStatus('PENDING_SHIPMENT');
+  const seen = new Set();
+  const orders = [];
+  for (const order of [...candidates, ...pendingShip]) {
+    if (seen.has(order.orderId)) continue;
+    seen.add(order.orderId);
+    orders.push(order);
+  }
+
+  const now = Date.now();
+  for (const order of orders) {
+    let changed = false;
+    for (const sub of order.subOrders || []) {
+      if (sub.status !== 'SHIPPED') continue;
+      const shippedAtMs = getSubShippedAtMs(sub);
+      if (shippedAtMs == null) continue;
+      if (shippedAtMs + ORDER_AUTO_CONFIRM_MS > now) continue;
+      await orderRepo.updateSubOrderStatus(sub.subOrderId, 'COMPLETED');
+      changed = true;
+    }
+    if (changed) {
+      const fresh = await orderRepo.findById(order.orderId);
+      await syncMainOrderFulfillmentStatus(fresh);
+    }
+  }
+}
+
+function getSubShippedAtMs(sub) {
+  const raw = sub?.shipment?.shippedAt;
+  const t = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+function computeSubAutoConfirmDeadline(sub) {
+  if (sub.status !== 'SHIPPED') return null;
+  const shippedAtMs = getSubShippedAtMs(sub);
+  if (shippedAtMs == null) return null;
+  return new Date(shippedAtMs + ORDER_AUTO_CONFIRM_MS).toISOString();
+}
+
+/** 主单展示：最早一个待自动确认的子单截止时间 */
+function computeAutoConfirmDeadline(order) {
+  let earliest = null;
+  for (const sub of order.subOrders || []) {
+    const d = computeSubAutoConfirmDeadline(sub);
+    if (!d) continue;
+    if (!earliest || new Date(d).getTime() < new Date(earliest).getTime()) earliest = d;
+  }
+  return earliest;
+}
+
+/**
+ * 履约完成后聚合主单状态（不覆盖 REFUNDING/REFUNDED/CANCELLED/PENDING_PAYMENT）
+ * - 全部活跃子单 COMPLETED → 主单 COMPLETED
+ * - 存在 SHIPPED/COMPLETED 且无待发货 → SHIPPED
+ * - 存在 SHIPPED/COMPLETED 且仍有 PENDING_SHIPMENT → SHIPPED（部分发货）
+ * - 仅有待发货 → PENDING_SHIPMENT
+ */
+async function syncMainOrderFulfillmentStatus(order) {
+  if (!order) return null;
+  if (['REFUNDING', 'REFUNDED', 'CANCELLED', 'PENDING_PAYMENT'].includes(order.status)) {
+    return order;
+  }
+  const active = (order.subOrders || []).filter((s) => s.status !== 'CANCELLED');
+  if (!active.length) return order;
+
+  let next = order.status;
+  if (active.every((s) => s.status === 'COMPLETED')) {
+    next = 'COMPLETED';
+  } else if (active.some((s) => s.status === 'SHIPPED' || s.status === 'COMPLETED')) {
+    next = 'SHIPPED';
+  } else if (active.every((s) => s.status === 'PENDING_SHIPMENT' || s.status === 'PAID')) {
+    next = 'PENDING_SHIPMENT';
+  }
+
+  if (next !== order.status) {
+    await orderRepo.updateOrder(order.orderId, { status: next });
+    return orderRepo.findById(order.orderId);
+  }
+  return order;
 }
 
 /** 领域规则：商家 48h 未处理 APPLIED → ESCALATED */
@@ -301,9 +394,72 @@ export async function escalateOverdueAfterSales() {
   return afterSaleRepo.escalateOverdue(new Date());
 }
 
+/** 进行中 + 已退款 占用可售后数量；REJECTED 不占用 */
+const AFTER_SALE_QTY_OCCUPIED = new Set(['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING', 'REFUNDED']);
+const AFTER_SALE_IN_PROGRESS = new Set(['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING']);
+
+function getOccupiedQtyBySku(afterSales) {
+  const map = new Map();
+  for (const as of afterSales || []) {
+    if (!AFTER_SALE_QTY_OCCUPIED.has(as.status)) continue;
+    for (const line of as.items || []) {
+      const skuId = Number(line.skuId);
+      const qty = Number(line.quantity) || 0;
+      if (!Number.isInteger(skuId) || skuId <= 0 || qty <= 0) continue;
+      map.set(skuId, (map.get(skuId) || 0) + qty);
+    }
+  }
+  return map;
+}
+
+function buildRemainingItemsForSub(sub, occupiedBySku) {
+  return (sub.items || [])
+    .map((line) => {
+      const skuId = Number(line.skuId);
+      const ordered = Number(line.quantity) || 0;
+      const occupied = occupiedBySku.get(skuId) || 0;
+      const remaining = Math.max(0, ordered - occupied);
+      return {
+        skuId,
+        title: line.title,
+        price: line.price,
+        quantity: remaining,
+        orderedQuantity: ordered,
+      };
+    })
+    .filter((line) => line.quantity > 0);
+}
+
+async function orderHasInProgressAfterSale(orderId, excludeAfterSaleId = null) {
+  const list = await afterSaleRepo.listByOrderId(orderId);
+  return list.some(
+    (a) =>
+      a.afterSaleId !== excludeAfterSaleId && AFTER_SALE_IN_PROGRESS.has(a.status),
+  );
+}
+
+async function isOrderFullyRefundedByAfterSales(order) {
+  const list = await afterSaleRepo.listByOrderId(order.orderId);
+  const refundedQty = new Map();
+  for (const as of list) {
+    if (as.status !== 'REFUNDED') continue;
+    for (const line of as.items || []) {
+      const skuId = Number(line.skuId);
+      const qty = Number(line.quantity) || 0;
+      refundedQty.set(skuId, (refundedQty.get(skuId) || 0) + qty);
+    }
+  }
+  for (const line of order.items || []) {
+    const skuId = Number(line.skuId);
+    const ordered = Number(line.quantity) || 0;
+    if ((refundedQty.get(skuId) || 0) < ordered) return false;
+  }
+  return (order.items || []).length > 0;
+}
+
 /**
- * 领域规则：同意售后收尾 → REFUNDED；
- * AfterSaleRefunded：订单 REFUNDED，库存 available += quantity
+ * 领域规则：同意售后收尾 → 本售后 REFUNDED；
+ * 仅当订单全部商品均已 REFUNDED 时主单/子单 → REFUNDED；库存按本售后 items 回滚
  */
 async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
   for (const line of item.items || []) {
@@ -313,7 +469,6 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
     if (!Number.isInteger(quantity) || quantity <= 0) continue;
     const restored = await stockRepo.restoreAvailable(skuId, quantity);
     if (restored.error === 'SKU_NOT_FOUND') {
-      // Demo seed 售后可能指向未入库 SKU；跳过以保证仲裁可完成
       continue;
     }
     if (restored.error) return restored;
@@ -324,10 +479,26 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
     auditReason,
     auditedAt: new Date(),
   });
-  await orderRepo.updateOrder(item.orderId, { status: 'REFUNDED' });
-  if (item.subOrderId) {
-    await orderRepo.updateSubOrderStatus(item.subOrderId, 'REFUNDED');
+
+  const order = await orderRepo.findById(item.orderId);
+  if (order && (await isOrderFullyRefundedByAfterSales(order))) {
+    await orderRepo.updateOrder(item.orderId, { status: 'REFUNDED' });
+    for (const sub of order.subOrders || []) {
+      await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDED');
+    }
+  } else if (order && !(await orderHasInProgressAfterSale(item.orderId, item.afterSaleId))) {
+    // 部分退款完成且无进行中售后：退出 REFUNDING
+    if (order.status === 'REFUNDING') {
+      await orderRepo.updateOrder(item.orderId, { status: 'SHIPPED' });
+    }
+    if (item.subOrderId) {
+      const sub = order.subOrders?.find((s) => s.subOrderId === item.subOrderId);
+      if (sub?.status === 'REFUNDING') {
+        await orderRepo.updateSubOrderStatus(item.subOrderId, 'SHIPPED');
+      }
+    }
   }
+
   return { afterSale: afterSaleRepo.serialize(updated) };
 }
 
@@ -348,7 +519,7 @@ async function approveAfterSale(item, { auditReason = null } = {}) {
   return finalizeApprovedAfterSale(item, { auditReason });
 }
 
-/** 领域规则：售后拒绝关闭 → 订单退出 REFUNDING，恢复 SHIPPED */
+/** 领域规则：售后拒绝关闭 → 若无其它进行中售后，订单退出 REFUNDING */
 async function closeRejectedAfterSale(item, reason) {
   const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
     status: 'REJECTED',
@@ -356,10 +527,11 @@ async function closeRejectedAfterSale(item, reason) {
     auditedAt: new Date(),
   });
   const order = await orderRepo.findById(item.orderId);
-  if (order?.status === 'REFUNDING') {
+  const stillOpen = await orderHasInProgressAfterSale(item.orderId, item.afterSaleId);
+  if (!stillOpen && order?.status === 'REFUNDING') {
     await orderRepo.updateOrder(item.orderId, { status: 'SHIPPED' });
   }
-  if (item.subOrderId) {
+  if (!stillOpen && item.subOrderId) {
     const sub = order?.subOrders?.find((s) => s.subOrderId === item.subOrderId);
     if (sub?.status === 'REFUNDING') {
       await orderRepo.updateSubOrderStatus(item.subOrderId, 'SHIPPED');
@@ -436,12 +608,30 @@ export async function findUserById(id) {
   return userRepo.findById(id);
 }
 
+const AVATAR_MAX_LENGTH = 300000;
+const AVATAR_HTTP_RE = /^https?:\/\/.+/i;
+const AVATAR_DATA_RE = /^data:image\/(jpeg|jpg|png|gif|webp);base64,[a-z0-9+/=\s]+$/i;
+
+function normalizeAvatarUrl(value) {
+  if (value == null) return { avatarUrl: null };
+  const avatarUrl = String(value).trim();
+  if (!avatarUrl) return { avatarUrl: null };
+  if (avatarUrl.length > AVATAR_MAX_LENGTH) {
+    return { error: 'INVALID_INPUT', message: '头像文件过大，请选择约 200KB 以内的图片' };
+  }
+  if (AVATAR_HTTP_RE.test(avatarUrl) || AVATAR_DATA_RE.test(avatarUrl)) {
+    return { avatarUrl };
+  }
+  return { error: 'INVALID_INPUT', message: '头像须为 http(s) 图片地址或本地上传的图片' };
+}
+
 export function serializeUserProfile(user) {
   if (!user) return null;
   return {
     userId: user.id,
     phone: user.phone,
     nickname: user.nickname || null,
+    avatarUrl: user.avatarUrl || null,
   };
 }
 
@@ -451,7 +641,7 @@ export async function getUserProfile(userId) {
   return serializeUserProfile(user);
 }
 
-/** 领域规则：手机号唯一且不可改；可改昵称；改密需校验原密码 */
+/** 领域规则：手机号唯一且不可改；可改昵称/头像；改密需校验原密码 */
 export async function updateUserProfile(userId, payload = {}) {
   const user = await userRepo.findById(userId);
   if (!user) return { error: 'NOT_FOUND', message: '用户不存在' };
@@ -462,6 +652,12 @@ export async function updateUserProfile(userId, payload = {}) {
     if (!nickname) return { error: 'INVALID_INPUT', message: '昵称不能为空' };
     if (nickname.length > 64) return { error: 'INVALID_INPUT', message: '昵称最多 64 个字符' };
     updates.nickname = nickname;
+  }
+
+  if (payload.avatarUrl !== undefined) {
+    const normalized = normalizeAvatarUrl(payload.avatarUrl);
+    if (normalized.error) return normalized;
+    updates.avatarUrl = normalized.avatarUrl;
   }
 
   const { currentPassword, newPassword } = payload;
@@ -568,9 +764,23 @@ export async function setDefaultAddress(userId, addressId) {
 
 async function buildCartSkuSnapshot(skuId) {
   const snapshot = await productRepo.findSkuSnapshot(skuId);
-  if (!snapshot || snapshot.status !== 'ON_SHELF') return null;
+  if (!snapshot) return null;
+  if (snapshot.status !== 'ON_SHELF') {
+    return {
+      skuId: snapshot.skuId,
+      spuId: snapshot.spuId,
+      specJson: snapshot.specJson || {},
+      price: 0,
+      stock: 0,
+      title: '商品已下架',
+      mainImage: snapshot.mainImage || '',
+      shopName: snapshot.shopName || '',
+      invalid: true,
+    };
+  }
   return {
     skuId: snapshot.skuId,
+    spuId: snapshot.spuId,
     specJson: snapshot.specJson,
     price: snapshot.price,
     stock: snapshot.stock.available,
@@ -588,12 +798,14 @@ async function serializeCartItem(item) {
     quantity: item.quantity,
     sku: sku || {
       skuId: item.skuId,
+      spuId: null,
       specJson: {},
       price: 0,
       stock: 0,
       title: '商品已下架',
       mainImage: '',
       shopName: '',
+      invalid: true,
     },
   };
 }
@@ -710,13 +922,13 @@ export async function getAdminProductDetail(spuId) {
   return productRepo.findById(spuId);
 }
 
-export async function getPublicProducts(page = 1, pageSize = 20, categoryId) {
+export async function getPublicProducts(page = 1, pageSize = 20, categoryId, keyword) {
   await expirePendingOrders();
   let categoryIds;
   if (categoryId != null && categoryId !== '') {
     categoryIds = await categoryRepo.getCategoryFilterIds(categoryId);
   }
-  return productRepo.listPublicProducts({ page, pageSize, categoryIds });
+  return productRepo.listPublicProducts({ page, pageSize, categoryIds, keyword });
 }
 
 export async function getCategories() {
@@ -751,7 +963,12 @@ function serializeFavoriteItem(favorite, spu) {
 
 export async function getFavorites(userId) {
   const list = await favoriteRepo.listByUser(userId);
-  return list.map((item) => serializeFavoriteItem(item, getSpuById(item.spuId)));
+  const result = [];
+  for (const item of list) {
+    const spu = await productRepo.findById(item.spuId);
+    result.push(serializeFavoriteItem(item, spu));
+  }
+  return result;
 }
 
 export async function isFavorite(userId, spuId) {
@@ -765,13 +982,13 @@ export async function addFavorite(userId, spuId) {
   if (!Number.isInteger(id) || id <= 0) {
     return { error: 'INVALID_INPUT', message: 'spuId 无效' };
   }
-  const spu = getSpuById(id);
+  const spu = await productRepo.findById(id);
   if (!spu || spu.status !== 'ON_SHELF') {
     return { error: 'PRODUCT_NOT_ON_SHELF', message: '商品不存在或未上架' };
   }
   const existing = await favoriteRepo.findByUserAndSpu(userId, id);
   if (existing) {
-    return { error: 'ALREADY_EXISTS', message: '已收藏该商品' };
+    return { error: 'ALREADY_EXISTS', message: '已收藏该商品', favorite: serializeFavoriteItem(existing, spu) };
   }
   const created = await favoriteRepo.create(userId, id);
   return { favorite: serializeFavoriteItem(created, spu) };
@@ -929,6 +1146,9 @@ function formatAddressSnapshot(address) {
 }
 
 function serializeOrder(order, { includeSubOrders = false, afterSales = null } = {}) {
+  const activeSubs = (order.subOrders || []).filter((s) => s.status !== 'CANCELLED');
+  const canConfirmAllReceipt =
+    activeSubs.length > 0 && activeSubs.every((s) => s.status === 'SHIPPED');
   const base = {
     orderId: order.orderId,
     orderNo: order.orderNo,
@@ -942,6 +1162,8 @@ function serializeOrder(order, { includeSubOrders = false, afterSales = null } =
     })),
     createdAt: order.createdAt,
     paymentDeadline: order.paymentDeadline,
+    autoConfirmDeadline: computeAutoConfirmDeadline(order),
+    canConfirmAllReceipt,
   };
   if (includeSubOrders) {
     base.subOrders = order.subOrders.map((s) => ({
@@ -951,6 +1173,7 @@ function serializeOrder(order, { includeSubOrders = false, afterSales = null } =
       status: s.status,
       items: s.items,
       shipment: s.shipment || null,
+      autoConfirmDeadline: computeSubAutoConfirmDeadline(s),
     }));
     base.addressSnapshot = order.addressSnapshot;
   }
@@ -1074,8 +1297,8 @@ export async function getOrderById(userId, orderId) {
   return serializeOrder(order, { includeSubOrders: true, afterSales });
 }
 
-/** 领域规则：SHIPPED/COMPLETED → REFUNDING；AfterSale APPLIED，商家 48h 处理窗口 */
-export async function createAfterSale(userId, orderId, { type, reason, subOrderId } = {}) {
+/** 领域规则：按 SKU 申请售后；一单可多笔；整件 quantity=剩余可售后量 */
+export async function createAfterSale(userId, orderId, { type, reason, subOrderId, items } = {}) {
   await expirePendingOrders();
   if (!AFTER_SALE_TYPES.has(type)) {
     return { error: 'INVALID_TYPE', message: '售后类型无效' };
@@ -1086,26 +1309,100 @@ export async function createAfterSale(userId, orderId, { type, reason, subOrderI
 
   const order = await orderRepo.findByIdAndUser(orderId, userId);
   if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
-  if (!['SHIPPED', 'COMPLETED'].includes(order.status)) {
-    return { error: 'INVALID_STATE', message: '仅已发货或已完成订单可申请售后' };
+  if (!['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(order.status)) {
+    return { error: 'INVALID_STATE', message: '仅已发货、已完成或退款中订单可继续申请售后' };
   }
 
   const existing = await afterSaleRepo.listByOrderId(orderId);
-  const hasOpen = existing.some((a) =>
-    ['APPLIED', 'ESCALATED', 'APPROVED', 'RETURNING'].includes(a.status),
-  );
-  if (hasOpen) {
-    return { error: 'ALREADY_EXISTS', message: '该订单已有进行中的售后' };
-  }
+  const occupiedBySku = getOccupiedQtyBySku(existing);
 
   let sub = null;
   if (subOrderId) {
     sub = order.subOrders.find((s) => s.subOrderId === Number(subOrderId));
     if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
-  } else {
-    sub = order.subOrders.find((s) => ['SHIPPED', 'COMPLETED'].includes(s.status)) || order.subOrders[0];
   }
-  if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+
+  const remainingBySub = new Map();
+  for (const s of order.subOrders || []) {
+    if (!['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(s.status)) continue;
+    remainingBySub.set(s.subOrderId, buildRemainingItemsForSub(s, occupiedBySku));
+  }
+
+  let selectedLines = [];
+  if (Array.isArray(items) && items.length > 0) {
+    const want = items.map((it) => ({
+      skuId: Number(it.skuId),
+      quantity: Number(it.quantity),
+    }));
+    for (const w of want) {
+      if (!Number.isInteger(w.skuId) || w.skuId <= 0) {
+        return { error: 'INVALID_INPUT', message: 'skuId 无效' };
+      }
+      if (!Number.isInteger(w.quantity) || w.quantity <= 0) {
+        return { error: 'INVALID_INPUT', message: 'quantity 须为正整数' };
+      }
+    }
+
+    // 定位子单：显式 subOrderId，或由 SKU 唯一归属推断
+    if (!sub) {
+      const candidates = [];
+      for (const [sid, remain] of remainingBySub.entries()) {
+        const ids = new Set(remain.map((r) => r.skuId));
+        if (want.every((w) => ids.has(w.skuId))) candidates.push(sid);
+      }
+      if (candidates.length === 1) {
+        sub = order.subOrders.find((s) => s.subOrderId === candidates[0]);
+      } else if (candidates.length === 0) {
+        return { error: 'INVALID_INPUT', message: '所选商品不在可售后子单中，或已无剩余可售后数量' };
+      } else {
+        return { error: 'INVALID_INPUT', message: '请指定 subOrderId（所选商品可能跨店）' };
+      }
+    }
+
+    const remainList = remainingBySub.get(sub.subOrderId) || [];
+    const remainMap = new Map(remainList.map((r) => [r.skuId, r]));
+    for (const w of want) {
+      const rem = remainMap.get(w.skuId);
+      if (!rem) {
+        return { error: 'INVALID_STATE', message: `SKU ${w.skuId} 无可售后剩余数量` };
+      }
+      // 本迭代：整件售后
+      if (w.quantity !== rem.quantity) {
+        return {
+          error: 'INVALID_INPUT',
+          message: `SKU ${w.skuId} 须整件申请，剩余可售后数量为 ${rem.quantity}`,
+        };
+      }
+      selectedLines.push({
+        skuId: rem.skuId,
+        title: rem.title,
+        price: rem.price,
+        quantity: rem.quantity,
+      });
+    }
+  } else {
+    // 兼容旧调用：未传 items 时，对该子单全部剩余商品整单申请
+    if (!sub) {
+      sub =
+        order.subOrders.find((s) => ['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(s.status)) ||
+        order.subOrders[0];
+    }
+    if (!sub) return { error: 'SUB_ORDER_NOT_FOUND', message: '子订单不存在' };
+    selectedLines = remainingBySub.get(sub.subOrderId) || [];
+    if (!selectedLines.length) {
+      return { error: 'INVALID_STATE', message: '该子单没有可申请售后的商品' };
+    }
+    selectedLines = selectedLines.map((r) => ({
+      skuId: r.skuId,
+      title: r.title,
+      price: r.price,
+      quantity: r.quantity,
+    }));
+  }
+
+  if (!selectedLines.length) {
+    return { error: 'INVALID_INPUT', message: '请选择要售后的商品' };
+  }
 
   const now = new Date();
   const merchantDeadline = new Date(now.getTime() + MERCHANT_AFTER_SALE_HOURS * 60 * 60 * 1000);
@@ -1121,11 +1418,15 @@ export async function createAfterSale(userId, orderId, { type, reason, subOrderI
     status: 'APPLIED',
     appliedAt: now,
     merchantDeadline,
-    items: sub.items,
+    items: selectedLines,
   });
 
-  await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
-  await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDING');
+  if (order.status !== 'REFUNDING') {
+    await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
+  }
+  if (sub.status !== 'REFUNDING') {
+    await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDING');
+  }
 
   return { afterSale: afterSaleRepo.serialize(created) };
 }
@@ -1241,6 +1542,56 @@ export async function cancelOrder(userId, orderId) {
   return { order: serializeOrder(updated, { includeSubOrders: true }) };
 }
 
+/** 领域：子单 SHIPPED → COMPLETED；主单全部完成后聚合 COMPLETED */
+export async function confirmSubOrderReceipt(userId, orderId, subOrderId) {
+  await expirePendingOrders();
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+  const sub = order.subOrders.find((s) => s.subOrderId === Number(subOrderId));
+  if (!sub) return { error: 'NOT_FOUND', message: '子订单不存在' };
+  if (sub.status !== 'SHIPPED') {
+    return { error: 'INVALID_STATE', message: '仅已发货的店铺包裹可确认收货' };
+  }
+  await orderRepo.updateSubOrderStatus(sub.subOrderId, 'COMPLETED');
+  const fresh = await orderRepo.findById(order.orderId);
+  const updated = await syncMainOrderFulfillmentStatus(fresh);
+  return { order: serializeOrder(updated, { includeSubOrders: true }) };
+}
+
+/**
+ * 整单确认：仅当全部活跃子单均为 SHIPPED 时，一次性确认所有店铺。
+ * 若仍有未发货子单 → 409，引导按子单确认。
+ */
+export async function confirmOrderReceipt(userId, orderId) {
+  await expirePendingOrders();
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+  const active = (order.subOrders || []).filter((s) => s.status !== 'CANCELLED');
+  if (!active.length) {
+    return { error: 'INVALID_STATE', message: '订单没有可确认的包裹' };
+  }
+  if (active.some((s) => s.status === 'PENDING_SHIPMENT' || s.status === 'PAID')) {
+    return {
+      error: 'INVALID_STATE',
+      message: '仍有商品未发货，请对已发货的店铺分别确认收货',
+    };
+  }
+  if (!active.every((s) => s.status === 'SHIPPED' || s.status === 'COMPLETED')) {
+    return { error: 'INVALID_STATE', message: '当前订单状态不允许整单确认收货' };
+  }
+  if (!active.some((s) => s.status === 'SHIPPED')) {
+    return { error: 'INVALID_STATE', message: '没有待确认收货的包裹' };
+  }
+  for (const sub of active) {
+    if (sub.status === 'SHIPPED') {
+      await orderRepo.updateSubOrderStatus(sub.subOrderId, 'COMPLETED');
+    }
+  }
+  const fresh = await orderRepo.findById(order.orderId);
+  const updated = await syncMainOrderFulfillmentStatus(fresh);
+  return { order: serializeOrder(updated, { includeSubOrders: true }) };
+}
+
 export async function getSubOrdersByMerchant(merchantId, status) {
   await expirePendingOrders();
   const list = await orderRepo.listSubOrdersByMerchant(merchantId, status);
@@ -1269,19 +1620,10 @@ export async function shipSubOrder(merchantId, subOrderId, { logisticsCompany, t
   await orderRepo.shipSubOrder(subOrderId, shipment);
 
   const updated = await orderRepo.findById(order.orderId);
-  const updatedSub = updated.subOrders.find((s) => s.subOrderId === subOrderId);
-  const activeSubs = updated.subOrders.filter((s) => s.status !== 'CANCELLED');
-  let orderStatus = updated.status;
-  if (activeSubs.length > 0 && activeSubs.every((s) => s.status === 'SHIPPED' || s.status === 'COMPLETED')) {
-    orderStatus = 'SHIPPED';
-  } else if (updated.status === 'PENDING_SHIPMENT' && activeSubs.some((s) => s.status === 'SHIPPED')) {
-    orderStatus = 'SHIPPED';
-  }
-  if (orderStatus !== updated.status) {
-    await orderRepo.updateOrder(order.orderId, { status: orderStatus });
-  }
+  const synced = await syncMainOrderFulfillmentStatus(updated);
+  const updatedSub = synced.subOrders.find((s) => s.subOrderId === subOrderId);
 
-  return { subOrder: updatedSub, orderId: order.orderId, orderStatus };
+  return { subOrder: updatedSub, orderId: order.orderId, orderStatus: synced.status };
 }
 
 export async function getMerchantAfterSales(merchantId, status) {
@@ -1479,11 +1821,44 @@ function buildAfterSaleCardPayload(item) {
   };
 }
 
+function buildOrderMerchantCardPayload(order, sub) {
+  const items = sub.items || [];
+  const amount = items.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 0), 0);
+  return {
+    afterSaleId: null,
+    orderId: order.orderId,
+    orderNo: order.orderNo,
+    shopName: sub.shopName,
+    merchantId: sub.merchantId,
+    orderStatus: order.status,
+    subOrderStatus: sub.status,
+    amount,
+    itemTitles: items.map((it) => it.title).filter(Boolean).slice(0, 3),
+  };
+}
+
 async function enrichThread(thread) {
   if (!thread) return null;
-  const item = await afterSaleRepo.findById(thread.afterSaleId);
+  if (thread.afterSaleId) {
+    const item = await afterSaleRepo.findById(thread.afterSaleId);
+    return {
+      ...thread,
+      afterSaleStatus: item ? item.status : null,
+      merchantId: thread.merchantId ?? (item ? item.merchantId : null),
+      shopName: item ? item.shopName : null,
+    };
+  }
+  let shopName = null;
+  if (thread.orderId && thread.merchantId) {
+    const order = await orderRepo.findById(thread.orderId);
+    const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
+    shopName = sub?.shopName || null;
+  }
   return {
     ...thread,
+    afterSaleStatus: null,
+    merchantId: thread.merchantId,
+    shopName,
     afterSaleStatus: item ? item.status : null,
     merchantId: item ? item.merchantId : null,
   };
@@ -1491,6 +1866,31 @@ async function enrichThread(thread) {
 
 async function assertThreadAccess(actor, thread) {
   if (!thread) return { error: 'NOT_FOUND', message: '会话不存在' };
+  if (actor.kind === 'user') {
+    if (thread.userId !== actor.user.id) {
+      return { error: 'FORBIDDEN', message: '无权访问该会话' };
+    }
+    return null;
+  }
+  if (actor.kind === 'admin') {
+    if (thread.type !== 'USER_CS') {
+      return { error: 'FORBIDDEN', message: '客服仅可访问平台客服会话' };
+    }
+    return null;
+  }
+  if (actor.kind === 'merchant') {
+    if (thread.type !== 'USER_MERCHANT') {
+      return { error: 'FORBIDDEN', message: '商家仅可访问商家会话' };
+    }
+    if (thread.merchantId != null && thread.merchantId === actor.merchant.id) {
+      return null;
+    }
+    if (thread.afterSaleId) {
+      const item = await afterSaleRepo.findById(thread.afterSaleId);
+      if (item && item.merchantId === actor.merchant.id) return null;
+    }
+    return { error: 'FORBIDDEN', message: '无权访问该会话' };
+  }
   if (thread.type === 'USER_CS') {
     if (actor.kind === 'admin') return null;
     if (actor.kind === 'user' && thread.userId === actor.user.id) return null;
@@ -1527,7 +1927,6 @@ export async function ensureUserCsThread(userId, afterSaleId) {
       type: 'USER_CS',
     });
   } catch (err) {
-    // unique race
     const again = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_CS');
     if (again) return { thread: await enrichThread(again), created: false };
     throw err;
@@ -1553,6 +1952,30 @@ export async function ensureUserCsThread(userId, afterSaleId) {
   return { thread: await enrichThread(thread), created: true };
 }
 
+/**
+ * 幂等：USER_MERCHANT 开聊。
+ * actor: { kind:'user', user } | { kind:'merchant', merchant }
+ */
+export async function ensureUserMerchantThread(actor, afterSaleId) {
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+
+  if (actor.kind === 'user') {
+    if (item.userId !== actor.user.id) return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  } else if (actor.kind === 'merchant') {
+    if (item.merchantId !== actor.merchant.id) return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  } else {
+    return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  }
+
+  const existing = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
+  if (existing) {
+    return { thread: await enrichThread(existing), created: false };
+  }
+
+  if (item.status !== 'APPLIED') {
+    return { error: 'INVALID_STATE', message: '当前售后状态不可新建商家会话' };
+  }
 async function ensureUserMerchantThread(afterSaleId) {
   const item = await afterSaleRepo.findById(afterSaleId);
   if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
@@ -1567,6 +1990,7 @@ async function ensureUserMerchantThread(afterSaleId) {
       orderId: item.orderId,
       orderNo: item.orderNo,
       userId: item.userId,
+      merchantId: item.merchantId,
       type: 'USER_MERCHANT',
     });
   } catch (err) {
@@ -1580,6 +2004,7 @@ async function ensureUserMerchantThread(afterSaleId) {
     senderType: 'SYSTEM',
     senderId: null,
     msgType: 'TEXT',
+    content: `已接入与「${item.shopName || '商家'}」的沟通，请说明售后问题。协商不成可申请平台介入。`,
     content: '已建立用户与商家的售后沟通会话，请围绕该售后订单协商处理。',
     payload: null,
   });
@@ -1591,6 +2016,84 @@ async function ensureUserMerchantThread(afterSaleId) {
     content: '售后订单卡片',
     payload: buildAfterSaleCardPayload(item),
   });
+
+  return { thread: await enrichThread(thread), created: true };
+}
+
+/**
+ * 订单级 USER_MERCHANT：待发货沟通（改色/催发货等）
+ * body: { merchantId } | { subOrderId }
+ */
+export async function ensureOrderMerchantThread(userId, orderId, body = {}) {
+  const order = await orderRepo.findByIdAndUser(orderId, userId);
+  if (!order) return { error: 'NOT_FOUND', message: '订单不存在' };
+
+  let merchantId = body.merchantId != null ? Number(body.merchantId) : null;
+  let sub = null;
+  if (body.subOrderId != null) {
+    const subOrderId = Number(body.subOrderId);
+    sub = (order.subOrders || []).find((s) => s.subOrderId === subOrderId);
+    if (!sub) return { error: 'NOT_FOUND', message: '子订单不存在' };
+    merchantId = sub.merchantId;
+  } else if (merchantId != null) {
+    sub = (order.subOrders || []).find((s) => s.merchantId === merchantId);
+    if (!sub) return { error: 'NOT_FOUND', message: '订单中无该商家子单' };
+  } else {
+    return { error: 'INVALID_INPUT', message: '请提供 merchantId 或 subOrderId' };
+  }
+
+  const allowedOrder = ['PENDING_SHIPMENT', 'PAID', 'SHIPPED', 'COMPLETED', 'REFUNDING'].includes(order.status);
+  const allowedSub = ['PENDING_SHIPMENT', 'PAID', 'SHIPPED', 'COMPLETED', 'REFUNDING'].includes(sub.status);
+  // 产品要求：未发货即可联系；已发货也可继续沟通
+  if (!allowedOrder || !allowedSub) {
+    return { error: 'INVALID_STATE', message: '当前订单状态不可联系商家' };
+  }
+  if (['CANCELLED', 'REFUNDED'].includes(order.status) || ['CANCELLED', 'REFUNDED'].includes(sub.status)) {
+    return { error: 'INVALID_STATE', message: '当前订单状态不可联系商家' };
+  }
+
+  const existing = await chatRepo.findOpenThreadByOrderMerchant(order.orderId, merchantId, 'USER_MERCHANT');
+  if (existing) {
+    return { thread: await enrichThread(existing), created: false };
+  }
+
+  let thread;
+  try {
+    thread = await chatRepo.createThread({
+      afterSaleId: null,
+      orderId: order.orderId,
+      orderNo: order.orderNo,
+      userId: order.userId,
+      merchantId,
+      type: 'USER_MERCHANT',
+    });
+  } catch (err) {
+    const again = await chatRepo.findOpenThreadByOrderMerchant(order.orderId, merchantId, 'USER_MERCHANT');
+    if (again) return { thread: await enrichThread(again), created: false };
+    throw err;
+  }
+
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'TEXT',
+    content: `已接入与「${sub.shopName || '商家'}」的订单沟通，可咨询发货、规格颜色等问题。`,
+    payload: null,
+  });
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'CARD',
+    content: '订单卡片',
+    payload: buildOrderMerchantCardPayload(order, sub),
+  });
+
+  return { thread: await enrichThread(thread), created: true };
+}
+
+export async function listChatThreads(actor, { status, type } = {}) {
   return { thread: await enrichThread(thread), created: true };
 }
 
@@ -1614,6 +2117,11 @@ export async function listChatThreads(actor, { status } = {}) {
     return Promise.all(list.map(enrichThread));
   }
   if (actor.kind === 'merchant') {
+    if (type && type !== 'USER_MERCHANT') return [];
+    const list = await chatRepo.listThreadsForMerchant(actor.merchant.id, { status });
+    return Promise.all(list.map(enrichThread));
+  }
+  const list = await chatRepo.listThreadsForUser(actor.user.id, { status, type });
     const list = await chatRepo.listThreadsForMerchant(actor.merchant.id, { status });
     return Promise.all(list.map(enrichThread));
   }
@@ -1655,9 +2163,32 @@ export async function postChatMessage(actor, threadId, body = {}) {
 
   if (msgType === 'TEXT') {
     if (!content) return { error: 'INVALID', message: '消息内容不能为空' };
+  } else if (thread.afterSaleId) {
+    const item = await afterSaleRepo.findById(thread.afterSaleId);
+    if (!item) return { error: 'NOT_FOUND', message: '关联售后不存在' };
+    payload = payload || buildAfterSaleCardPayload(item);
   } else {
     payload = payload || buildAfterSaleCardPayload(afterSale);
     content = content || '售后订单卡片';
+  } else {
+    const order = await orderRepo.findById(thread.orderId);
+    const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
+    if (!order || !sub) return { error: 'NOT_FOUND', message: '关联订单不存在' };
+    payload = payload || buildOrderMerchantCardPayload(order, sub);
+    content = content || '订单卡片';
+  }
+
+  let senderType = 'USER';
+  let senderId = null;
+  if (actor.kind === 'admin') {
+    senderType = 'CS_AGENT';
+    senderId = actor.admin.id;
+  } else if (actor.kind === 'merchant') {
+    senderType = 'MERCHANT';
+    senderId = actor.merchant.id;
+  } else {
+    senderType = 'USER';
+    senderId = actor.user.id;
   }
 
   const senderType = actor.kind === 'admin' ? 'CS_AGENT' : actor.kind === 'merchant' ? 'MERCHANT' : 'USER';
@@ -1676,6 +2207,9 @@ export async function postChatMessage(actor, threadId, body = {}) {
 export async function runChatAction(admin, threadId, actionKey, body = {}) {
   const thread = await chatRepo.findThreadById(threadId);
   if (!thread) return { error: 'NOT_FOUND', message: '会话不存在' };
+  if (thread.type !== 'USER_CS') {
+    return { error: 'INVALID', message: '该动作仅适用于平台客服会话' };
+  }
   if (thread.type !== 'USER_CS') return { error: 'FORBIDDEN', message: '该会话不支持客服快捷动作' };
 
   const key = String(actionKey || '').toUpperCase();
@@ -1714,6 +2248,45 @@ export async function runChatAction(admin, threadId, actionKey, body = {}) {
       : `【系统】客服已裁定拒绝售后。原因：${reason}`,
     payload: { actionKey: key, approved, reason },
   });
-
   return { message, afterSale: arb.afterSale };
+}
+
+/** 商家快捷：同意/拒绝售后（对接 auditMerchantAfterSale） */
+export async function runMerchantChatAction(merchant, threadId, actionKey, body = {}) {
+  const thread = await chatRepo.findThreadById(threadId);
+  if (!thread) return { error: 'NOT_FOUND', message: '会话不存在' };
+  if (thread.type !== 'USER_MERCHANT') {
+    return { error: 'INVALID', message: '该动作仅适用于商家会话' };
+  }
+  if (!thread.afterSaleId) {
+    return { error: 'INVALID', message: '订单沟通会话不支持售后快捷动作' };
+  }
+  const denied = await assertThreadAccess({ kind: 'merchant', merchant }, thread);
+  if (denied) return denied;
+
+  const key = String(actionKey || '').toUpperCase();
+  if (key !== 'MERCHANT_APPROVE' && key !== 'MERCHANT_REJECT') {
+    return { error: 'INVALID', message: '未知 actionKey' };
+  }
+
+  const approved = key === 'MERCHANT_APPROVE';
+  const reason = body.reason || (approved ? '商家同意售后' : '商家拒绝售后');
+  if (!approved && !String(body.reason || '').trim()) {
+    return { error: 'REASON_REQUIRED', message: '拒绝须填写原因' };
+  }
+
+  const result = await auditMerchantAfterSale(merchant.id, thread.afterSaleId, { approved, reason });
+  if (result.error) return result;
+
+  const message = await chatRepo.createMessage({
+    threadId,
+    senderType: 'SYSTEM',
+    senderId: merchant.id,
+    msgType: 'QUICK_ACTION',
+    content: approved
+      ? '【系统】商家已同意售后，请按后续流程处理。'
+      : `【系统】商家已拒绝售后。原因：${reason}`,
+    payload: { actionKey: key, approved, reason },
+  });
+  return { message, afterSale: result.afterSale };
 }

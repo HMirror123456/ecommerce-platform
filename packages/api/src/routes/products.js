@@ -7,8 +7,8 @@ router.get('/', async (req, res, next) => {
   try {
     const page = Number(req.query.page) || 1;
     const pageSize = Number(req.query.pageSize) || 20;
-    const { categoryId } = req.query;
-    res.json(await getPublicProducts(page, pageSize, categoryId));
+    const { categoryId, keyword, q } = req.query;
+    res.json(await getPublicProducts(page, pageSize, categoryId, keyword || q));
   } catch (err) {
     next(err);
   }

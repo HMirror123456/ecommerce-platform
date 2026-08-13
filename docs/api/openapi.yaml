@@ -279,6 +279,16 @@ paths:
           in: query
           schema:
             type: integer
+        - name: keyword
+          in: query
+          description: 按商品标题关键词模糊搜索
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: keyword 的兼容别名
+          schema:
+            type: string
         - name: page
           in: query
           schema:
@@ -667,10 +677,66 @@ paths:
         '200':
           description: OK
 
+  /orders/{orderId}/confirm-receipt:
+    post:
+      tags: [order]
+      summary: 整单确认收货
+      description: |
+        仅当全部活跃子单均为已发货（SHIPPED）时可操作，将各 SHIPPED 子单与主单置为 COMPLETED。
+        若仍有子单未发货，请改用按子单确认收货接口。
+        领域：SubOrder SHIPPED → COMPLETED；主单全部完成后聚合为 COMPLETED。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 确认成功，返回更新后的订单
+        '404':
+          description: 订单不存在
+        '409':
+          description: 仍有子单未发货或状态不允许确认收货
+
+  /orders/{orderId}/sub-orders/{subOrderId}/confirm-receipt:
+    post:
+      tags: [order]
+      summary: 按子单确认收货
+      description: |
+        用户确认某一店铺（子单）已收货。仅该子单为 SHIPPED 时可操作。
+        子单 → COMPLETED 后按规则聚合主单：全部活跃子单 COMPLETED 时主单才 COMPLETED。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: subOrderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 确认成功，返回更新后的订单
+        '404':
+          description: 订单或子单不存在
+        '409':
+          description: 子单状态不允许确认收货
+
   /orders/{orderId}/after-sales:
     post:
       tags: [order]
-      summary: 用户申请售后
+      summary: 用户申请售后（按 SKU，支持一单多笔）
+      description: |
+        选择同一子单下的一个或多个 SKU 申请售后。
+        每个 SKU 的 quantity 须为剩余可售后整件数量。
+        同一订单可多次申请，只要 SKU 仍有剩余可售后数量。
       security:
         - bearerAuth: []
       parameters:
@@ -692,6 +758,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AfterSale'
+        '400':
+          description: 参数无效或数量不合法
+        '409':
+          description: 状态不允许或 SKU 可售后数量不足
 
   /orders/{orderId}/after-sales/{afterSaleId}/escalate:
     post:
@@ -1660,6 +1730,10 @@ paths:
   /after-sales/{afterSaleId}/merchant-chat/thread:
     post:
       tags: [chat]
+      summary: 开聊或获取已有售后 USER_MERCHANT 会话（幂等）
+      description: |
+        用户对本人售后开聊；商家对本店售后开聊/取会话。
+        建议售后状态为 APPLIED 时新建；已有 OPEN 会话可直接返回。
       summary: 用户开聊或获取已有 USER_MERCHANT 会话（幂等）
       security:
         - bearerAuth: []
@@ -1683,6 +1757,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChatThread'
         '403':
+          description: 非本人/非本店售后
+        '404':
+          description: 售后不存在
+        '409':
+          description: 当前售后状态不允许新建商家会话
+
+  /orders/{orderId}/merchant-chat/thread:
+    post:
+      tags: [chat]
+      summary: 开聊或获取订单级 USER_MERCHANT 会话（幂等）
+      description: |
+        用于待发货等履约前沟通（改规格/颜色、催发货等）。
+        请求体传 merchantId 或 subOrderId；同一 orderId+merchantId 至多一条 OPEN。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
           description: 非本人售后
         '404':
           description: 售后不存在
@@ -1699,6 +1790,18 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                merchantId:
+                  type: integer
+                subOrderId:
+                  type: integer
+              description: merchantId 与 subOrderId 至少传一个
       responses:
         '200':
           description: 已有会话
@@ -1713,6 +1816,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChatThread'
         '403':
+          description: 非本人订单或非目标店铺
+        '404':
+          description: 订单/子单不存在
+        '409':
+          description: 当前订单状态不允许联系商家
           description: 非本店售后
         '404':
           description: 售后不存在
@@ -1721,6 +1829,10 @@ paths:
     get:
       tags: [chat]
       summary: 会话列表
+      description: |
+        用户：本人会话（可按 type 过滤）；
+        商家：本店 USER_MERCHANT；
+        CS_AGENT/SUPER_ADMIN：USER_CS 全部。
       description: 用户仅见自己的 USER_CS；商家仅见本店 USER_MERCHANT；CS_AGENT/SUPER_ADMIN 仅见全部 USER_CS
       security:
         - bearerAuth: []
@@ -1730,6 +1842,12 @@ paths:
           schema:
             type: string
             enum: [OPEN, CLOSED]
+        - name: type
+          in: query
+          description: 不传则按角色默认（用户=全部类型，商家=USER_MERCHANT，客服=USER_CS）
+          schema:
+            type: string
+            enum: [USER_CS, USER_MERCHANT]
       responses:
         '200':
           description: OK
@@ -1800,9 +1918,10 @@ paths:
   /chat/threads/{threadId}/actions/{actionKey}:
     post:
       tags: [chat]
-      summary: 客服快捷动作
+      summary: 客服或商家快捷动作
       description: |
-        CS_APPROVE / CS_REJECT 调用售后 arbitrate；HINT_RETURN 仅写 SYSTEM 引导文案。
+        客服（USER_CS）：CS_APPROVE / CS_REJECT → arbitrate；HINT_RETURN → SYSTEM 文案。
+        商家（USER_MERCHANT）：MERCHANT_APPROVE / MERCHANT_REJECT → merchant after-sale audit，并写 SYSTEM 消息。
       security:
         - bearerAuth: []
       parameters:
@@ -1857,6 +1976,8 @@ components:
           enum: [USER_CS, USER_MERCHANT]
         afterSaleId:
           type: integer
+          nullable: true
+          description: 售后会话必填；订单级沟通可空
         orderId:
           type: integer
         orderNo:
@@ -1865,6 +1986,10 @@ components:
           type: integer
         merchantId:
           type: integer
+          nullable: true
+          description: USER_MERCHANT 时必有；USER_CS 可空
+        shopName:
+          type: string
           nullable: true
           description: USER_MERCHANT 会话由关联售后单解析的所属商家
         status:
@@ -1888,6 +2013,7 @@ components:
           type: integer
         senderType:
           type: string
+          enum: [USER, CS_AGENT, MERCHANT, SYSTEM]
           enum: [USER, MERCHANT, CS_AGENT, SYSTEM]
         senderId:
           type: integer
@@ -1925,6 +2051,8 @@ components:
         - CS_APPROVE
         - CS_REJECT
         - HINT_RETURN
+        - MERCHANT_APPROVE
+        - MERCHANT_REJECT
 
     UserRegisterRequest:
       type: object
@@ -1955,6 +2083,10 @@ components:
         nickname:
           type: string
           nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+          description: 头像 URL（可为空）
 
     UserProfile:
       type: object
@@ -1966,6 +2098,10 @@ components:
         nickname:
           type: string
           nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+          description: 头像 URL（可为空）
 
     FavoriteItem:
       type: object
@@ -1998,6 +2134,12 @@ components:
         nickname:
           type: string
           description: 昵称
+        avatarUrl:
+          type: string
+          nullable: true
+          description: |
+            头像图片地址。传空字符串可清除头像。
+            支持 http(s) URL，或演示用 data:image/*;base64,...（建议 ≤ 200KB）。
         currentPassword:
           type: string
           format: password
@@ -2277,7 +2419,7 @@ components:
 
     CreateAfterSaleRequest:
       type: object
-      required: [type, reason]
+      required: [type, reason, items]
       properties:
         type:
           $ref: '#/components/schemas/AfterSaleType'
@@ -2285,6 +2427,22 @@ components:
           type: string
         subOrderId:
           type: integer
+          description: 可选；多店铺订单时指定子单。省略则按 items 所属子单推断（items 须同属一个子单）
+        items:
+          type: array
+          minItems: 1
+          description: |
+            本次售后的商品行。skuId 须属于目标子单；
+            本迭代 quantity 须等于该 SKU 剩余可售后数量（整件售后）。
+          items:
+            type: object
+            required: [skuId, quantity]
+            properties:
+              skuId:
+                type: integer
+              quantity:
+                type: integer
+                minimum: 1
 
     AfterSaleAuditRequest:
       type: object
@@ -2507,6 +2665,24 @@ components:
             shippedAt:
               type: string
               format: date-time
+        autoConfirmDeadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: 该子单自动确认收货截止时间（仅 SHIPPED 时有值）
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              skuId:
+                type: integer
+              title:
+                type: string
+              price:
+                type: number
+              quantity:
+                type: integer
 
     ProductStatus:
       type: string
@@ -2990,3 +3166,27 @@ components:
         createdAt:
           type: string
           format: date-time
+        paymentDeadline:
+          type: string
+          format: date-time
+          description: 待支付截止时间（创建后 15 分钟）
+        canConfirmAllReceipt:
+          type: boolean
+          description: 全部活跃子单均为 SHIPPED 时为 true，可调用整单确认收货
+        autoConfirmDeadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            主单维度：当前最早将自动确认的已发货子单截止时间（有 SHIPPED 子单时返回）。
+            子单维度见 subOrders[].autoConfirmDeadline。
+        subOrders:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubOrder'
+        addressSnapshot:
+          type: object
+        afterSales:
+          type: array
+          items:
+            $ref: '#/components/schemas/AfterSale'

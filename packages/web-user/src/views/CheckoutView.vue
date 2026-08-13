@@ -25,8 +25,18 @@ const totalAmount = computed(() =>
   lineItems.value.reduce((sum, item) => sum + item.price * item.quantity, 0),
 );
 
+const totalQuantity = computed(() =>
+  lineItems.value.reduce((sum, item) => sum + item.quantity, 0),
+);
+
 function formatPrice(value) {
   return `¥${Number(value).toFixed(2)}`;
+}
+
+function splitPrice(value) {
+  const fixed = Number(value).toFixed(2);
+  const [integer, decimal] = fixed.split('.');
+  return { integer, decimal };
 }
 
 function formatSpec(specJson) {
@@ -66,10 +76,17 @@ async function loadAddresses() {
 async function loadFromCart() {
   const cart = await fetchCartItems();
   const valid = cart.filter((item) => item.sku?.title && item.sku.title !== '商品已下架');
-  if (valid.length === 0) {
-    throw new Error('购物车没有可结算商品');
+  const rawIds = String(route.query.itemIds || '')
+    .split(',')
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  const selected = rawIds.length
+    ? valid.filter((item) => rawIds.includes(item.itemId))
+    : valid;
+  if (selected.length === 0) {
+    throw new Error(rawIds.length ? '所选商品不可结算，请返回购物车重新勾选' : '购物车没有可结算商品');
   }
-  lineItems.value = valid.map((item) => ({
+  lineItems.value = selected.map((item) => ({
     skuId: item.skuId,
     quantity: item.quantity,
     title: item.sku.title,
@@ -156,33 +173,45 @@ onMounted(loadCheckout);
 
 <template>
   <div class="checkout-page" v-loading="loading">
-    <h2 class="page-title">确认订单</h2>
+    <div class="page-header">
+      <h2 class="page-title">确认订单</h2>
+      <p class="page-sub">核对收货信息与商品后提交</p>
+    </div>
 
     <el-card shadow="never" class="section-card">
       <template #header>
         <div class="card-header">
-          <span>收货地址</span>
+          <span class="card-title">收货地址</span>
           <router-link to="/user/addresses" class="link">管理地址</router-link>
         </div>
       </template>
       <el-empty v-if="!loading && addresses.length === 0" description="暂无收货地址">
         <router-link to="/user/addresses"><el-button type="primary">去添加</el-button></router-link>
       </el-empty>
-      <el-radio-group v-else v-model="selectedAddressId" class="address-group">
-        <el-radio v-for="addr in addresses" :key="addr.id" :label="addr.id" class="address-radio">
-          <div class="address-block">
+      <div v-else class="address-grid">
+        <button
+          v-for="addr in addresses"
+          :key="addr.id"
+          type="button"
+          class="address-card"
+          :class="{ active: selectedAddressId === addr.id }"
+          @click="selectedAddressId = addr.id"
+        >
+          <div class="address-top">
             <p class="address-name">
-              {{ addr.receiverName }} {{ addr.phone }}
-              <el-tag v-if="addr.isDefault" size="small" type="success">默认</el-tag>
+              {{ addr.receiverName }}
+              <span class="phone">{{ addr.phone }}</span>
             </p>
-            <p class="address-detail">{{ formatFullAddress(addr) }}</p>
+            <el-tag v-if="addr.isDefault" size="small" type="danger" effect="plain">默认</el-tag>
           </div>
-        </el-radio>
-      </el-radio-group>
+          <p class="address-detail">{{ formatFullAddress(addr) }}</p>
+          <span class="address-check" />
+        </button>
+      </div>
     </el-card>
 
     <el-card shadow="never" class="section-card">
-      <template #header><span>商品清单</span></template>
+      <template #header><span class="card-title">商品清单</span></template>
       <el-empty v-if="!loading && lineItems.length === 0" description="暂无商品" />
       <div v-for="item in lineItems" :key="item.skuId" class="product-row">
         <img :src="item.mainImage" :alt="item.title" class="product-image" />
@@ -198,18 +227,34 @@ onMounted(loadCheckout);
     </el-card>
 
     <el-card shadow="never" class="section-card">
-      <template #header><span>订单备注</span></template>
-      <el-input v-model="remark" type="textarea" :rows="2" placeholder="选填：给商家留言" maxlength="200" show-word-limit />
+      <template #header><span class="card-title">订单备注</span></template>
+      <el-input
+        v-model="remark"
+        type="textarea"
+        :rows="2"
+        placeholder="选填：给商家留言"
+        maxlength="200"
+        show-word-limit
+      />
+      <p v-if="selectedAddress" class="ship-hint">
+        将送达：{{ selectedAddress.receiverName }} · {{ formatFullAddress(selectedAddress) }}
+      </p>
     </el-card>
 
     <div class="checkout-footer">
-      <div class="total">
-        合计：
-        <span class="total-amount">{{ formatPrice(totalAmount) }}</span>
+      <div class="footer-meta">
+        <span>共 {{ totalQuantity }} 件</span>
+        <div class="total">
+          合计：
+          <span class="total-amount">
+            <i>¥</i>{{ splitPrice(totalAmount).integer }}.{{ splitPrice(totalAmount).decimal }}
+          </span>
+        </div>
       </div>
       <el-button
         type="primary"
         size="large"
+        class="submit-btn"
         :loading="submitting"
         :disabled="lineItems.length === 0 || !selectedAddressId"
         @click="onSubmitOrder"
@@ -221,36 +266,243 @@ onMounted(loadCheckout);
 </template>
 
 <style scoped>
-.checkout-page { max-width: 960px; margin: 0 auto; padding-bottom: 32px; }
-.page-title { margin: 0 0 16px; font-size: 20px; }
-.section-card { margin-bottom: 16px; }
-.card-header { display: flex; align-items: center; justify-content: space-between; width: 100%; font-weight: 600; }
-.link { font-size: 13px; font-weight: normal; color: var(--color-primary); text-decoration: none; }
-.address-group { display: flex; flex-direction: column; gap: 8px; width: 100%; }
-.address-radio { height: auto; margin-right: 0; align-items: flex-start; }
-.address-block { line-height: 1.6; padding: 4px 0; }
-.address-name { margin: 0 0 4px; font-weight: 600; }
-.address-detail { margin: 0; color: var(--text-body); }
+.checkout-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+}
+
+.page-header {
+  margin-bottom: 16px;
+}
+
+.page-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.page-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.section-card {
+  margin-bottom: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.card-title {
+  font-weight: 700;
+}
+
+.link {
+  font-size: 13px;
+  font-weight: normal;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.address-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .address-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .product-row {
+    grid-template-columns: 72px 1fr;
+    gap: 10px;
+  }
+
+  .product-price,
+  .product-qty,
+  .product-subtotal {
+    grid-column: 2;
+    text-align: left;
+  }
+}
+
+.address-card {
+  position: relative;
+  padding: 14px 16px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.address-card:hover {
+  border-color: #ffb4b4;
+}
+
+.address-card.active {
+  border-color: var(--color-primary);
+  background: #fff8f8;
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.address-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.address-name {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text-title);
+}
+
+.address-name .phone {
+  margin-left: 8px;
+  font-weight: 500;
+  color: var(--text-body);
+}
+
+.address-detail {
+  margin: 0;
+  padding-right: 24px;
+  line-height: 1.6;
+  color: var(--text-body);
+  font-size: 13px;
+}
+
+.address-check {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+}
+
+.address-card.active .address-check {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+}
+
+.address-card.active .address-check::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
 .product-row {
   display: grid;
   grid-template-columns: 80px 1fr 100px 60px 100px;
   gap: 16px;
   align-items: center;
-  padding: 12px 0;
+  padding: 14px 0;
   border-bottom: 1px solid var(--border-color);
 }
-.product-row:last-child { border-bottom: none; }
+
+.product-row:last-child {
+  border-bottom: none;
+}
+
 .product-image {
-  width: 80px; height: 80px; object-fit: cover;
-  border-radius: 4px; border: 1px solid var(--border-color);
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: #fafafa;
 }
-.product-title { margin: 0 0 4px; font-weight: 600; }
-.product-meta, .product-stock { margin: 0; font-size: 12px; color: var(--text-muted); }
-.product-price, .product-qty, .product-subtotal { text-align: right; color: var(--text-body); }
-.product-subtotal { font-weight: 600; color: var(--color-primary); }
+
+.product-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.product-meta,
+.product-stock {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.product-price,
+.product-qty,
+.product-subtotal {
+  text-align: right;
+  color: var(--text-body);
+}
+
+.product-subtotal {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.ship-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .checkout-footer {
-  display: flex; align-items: center; justify-content: flex-end; gap: 24px;
-  padding: 16px 24px; background: #fff; border-radius: 8px; border: 1px solid var(--border-color);
+  position: sticky;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
-.total-amount { font-size: 24px; font-weight: 700; color: var(--color-primary); }
+
+.footer-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  color: var(--text-body);
+  font-size: 13px;
+}
+
+.total-amount {
+  margin-left: 4px;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--color-primary);
+  line-height: 1;
+}
+
+.total-amount i {
+  font-style: normal;
+  font-size: 16px;
+  margin-right: 2px;
+}
+
+.submit-btn {
+  min-width: 140px;
+  height: 44px;
+  font-size: 16px;
+}
 </style>

@@ -125,7 +125,8 @@ CREATE TABLE IF NOT EXISTS users (
   id INT PRIMARY KEY AUTO_INCREMENT,
   phone VARCHAR(20) NOT NULL UNIQUE,
   password VARCHAR(128) NOT NULL COMMENT 'Demo plaintext',
-  nickname VARCHAR(64) NULL
+  nickname VARCHAR(64) NULL,
+  avatar_url MEDIUMTEXT NULL COMMENT '头像 URL 或演示用 data URL'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS addresses (
@@ -245,16 +246,19 @@ CREATE TABLE IF NOT EXISTS after_sales (
 CREATE TABLE IF NOT EXISTS chat_threads (
   id INT PRIMARY KEY AUTO_INCREMENT,
   type VARCHAR(32) NOT NULL DEFAULT 'USER_CS',
-  after_sale_id INT NOT NULL,
+  after_sale_id INT NULL,
   order_id INT NOT NULL,
   order_no VARCHAR(64) NOT NULL,
   user_id INT NOT NULL,
+  merchant_id INT NULL,
   status VARCHAR(16) NOT NULL DEFAULT 'OPEN',
   created_at DATETIME(3) NOT NULL,
   updated_at DATETIME(3) NOT NULL,
   UNIQUE KEY uk_chat_threads_after_sale_type (after_sale_id, type),
   INDEX idx_chat_threads_user (user_id),
-  INDEX idx_chat_threads_status (status)
+  INDEX idx_chat_threads_status (status),
+  INDEX idx_chat_threads_merchant (merchant_id),
+  INDEX idx_chat_threads_order_merchant (order_id, merchant_id, type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS chat_messages (
