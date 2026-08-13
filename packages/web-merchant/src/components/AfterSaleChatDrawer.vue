@@ -2,6 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
+  closeMerchantChatThread,
   fetchMerchantChatMessages,
   openMerchantAfterSaleChat,
   sendMerchantChatMessage,
@@ -13,13 +14,14 @@ const props = defineProps({
   /** 订单级等无售后会话：直接传入列表中的 thread */
   initialThread: { type: Object, default: null },
 });
-const emit = defineEmits(['update:modelValue']);
+const emit = defineEmits(['update:modelValue', 'closed']);
 
 const loading = ref(false);
 const thread = ref(null);
 const messages = ref([]);
 const draft = ref('');
 const sending = ref(false);
+const closing = ref(false);
 let pollTimer = null;
 
 const STATUS_LABELS = {
@@ -63,11 +65,15 @@ function typeLabel(type) {
   return TYPE_LABELS[type] || type || '-';
 }
 
+const threadOpen = computed(() => thread.value?.status === 'OPEN');
+
 function isReadOnlyThread() {
+  if (!threadOpen.value) return true;
   return ['REFUNDED', 'ESCALATED'].includes(thread.value?.afterSaleStatus);
 }
 
 function readOnlyHint() {
+  if (!threadOpen.value) return '会话已关闭，无法继续发送';
   if (thread.value?.afterSaleStatus === 'ESCALATED') {
     return '该售后已进入平台仲裁，商家仅可查看历史沟通';
   }
@@ -125,7 +131,7 @@ async function openThread() {
 
 async function onSend() {
   const content = draft.value.trim();
-  if (!content || !thread.value) return;
+  if (!content || !thread.value || isReadOnlyThread()) return;
   sending.value = true;
   try {
     const message = await sendMerchantChatMessage(thread.value.id, { msgType: 'TEXT', content });
@@ -135,6 +141,20 @@ async function onSend() {
     ElMessage.error(e.message || '发送失败，请稍后重试');
   } finally {
     sending.value = false;
+  }
+}
+
+async function onCloseThread() {
+  if (!thread.value?.id || !threadOpen.value || closing.value) return;
+  closing.value = true;
+  try {
+    thread.value = await closeMerchantChatThread(thread.value.id);
+    ElMessage.success('会话已关闭');
+    emit('closed', thread.value);
+  } catch (e) {
+    ElMessage.error(e.message || '关闭会话失败');
+  } finally {
+    closing.value = false;
   }
 }
 
@@ -179,7 +199,19 @@ onUnmounted(stopPoll);
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div v-loading="loading" class="drawer-body">
-      <div v-if="thread" class="thread-meta">{{ metaLine() }}</div>
+      <div v-if="thread" class="thread-meta">
+        <span>{{ metaLine() }}</span>
+        <el-button
+          v-if="threadOpen"
+          link
+          type="info"
+          size="small"
+          :loading="closing"
+          @click="onCloseThread"
+        >
+          结束会话
+        </el-button>
+      </div>
       <div id="merchant-chat-scroll" class="msg-list">
         <el-empty v-if="!loading && !messages.length" description="暂无沟通消息" :image-size="72" />
         <div
@@ -226,7 +258,15 @@ onUnmounted(stopPoll);
 
 <style scoped>
 .drawer-body { display: flex; flex-direction: column; height: calc(100vh - 120px); }
-.thread-meta { margin-bottom: 8px; color: #999; font-size: 12px; }
+.thread-meta {
+  margin-bottom: 8px;
+  color: #999;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .msg-list { flex: 1; overflow: auto; padding: 12px; background: #f5f5f5; border-radius: 8px; }
 .bubble-row { display: flex; margin-bottom: 10px; }
 .bubble-row.mine { justify-content: flex-end; }

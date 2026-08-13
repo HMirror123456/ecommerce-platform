@@ -3,6 +3,7 @@ import {
   ensureUserCsThread,
   ensureUserMerchantThread,
   ensureOrderMerchantThread,
+  closeChatThread,
   getChatMessages,
   listChatThreads,
   postChatMessage,
@@ -124,6 +125,18 @@ router.post('/chat/threads/:threadId/messages', requireUserMerchantOrCs, async (
     if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
     if (result.error) return res.status(400).json({ message: result.message });
     res.status(201).json(result.message);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/chat/threads/:threadId/close', requireUserMerchantOrCs, async (req, res, next) => {
+  try {
+    const result = await closeChatThread(chatActor(req), Number(req.params.threadId));
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.json(result.thread);
   } catch (err) {
     next(err);
   }

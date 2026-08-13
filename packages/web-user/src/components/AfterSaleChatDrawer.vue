@@ -3,7 +3,14 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ChatDotRound, Shop } from '@element-plus/icons-vue';
-import { fetchChatMessages, openAfterSaleChat, openMerchantChat, openOrderMerchantChat, sendChatMessage } from '@/api/chat';
+import {
+  closeChatThread,
+  fetchChatMessages,
+  openAfterSaleChat,
+  openMerchantChat,
+  openOrderMerchantChat,
+  sendChatMessage,
+} from '@/api/chat';
 
 const AFTER_SALE_STATUS_LABELS = {
   APPLIED: '待商家处理',
@@ -39,8 +46,11 @@ const props = defineProps({
   threadType: { type: String, default: 'USER_CS' },
   /** 商家售后会话中展示「申请平台介入」 */
   canEscalate: { type: Boolean, default: false },
+  /** 会话列表进入：直接打开指定会话（含已关闭），避免误建新会话 */
+  initialThread: { type: Object, default: null },
 });
-const emit = defineEmits(['update:modelValue', 'escalate']);
+const emit = defineEmits(['update:modelValue', 'escalate', 'closed']);
+const closing = ref(false);
 
 const router = useRouter();
 const loading = ref(false);
@@ -144,21 +154,28 @@ async function loadMessages(reset) {
 }
 
 async function openThread() {
-  const needAfterSale = props.threadType === 'USER_CS' || (isMerchantChat.value && props.afterSaleId);
-  if (needAfterSale && !props.afterSaleId) {
-    openError.value = isMerchantChat.value
-      ? '缺少售后单信息，无法联系商家'
-      : '缺少售后单信息，无法打开客服会话';
-    return;
-  }
-  if (isOrderMerchantChat.value && (!props.orderId || !props.merchantId)) {
-    openError.value = '缺少订单或商家信息，无法联系商家';
-    return;
-  }
-
   loading.value = true;
   openError.value = '';
   try {
+    if (props.initialThread?.id) {
+      thread.value = props.initialThread;
+      await loadMessages(true);
+      startPoll();
+      return;
+    }
+
+    const needAfterSale = props.threadType === 'USER_CS' || (isMerchantChat.value && props.afterSaleId);
+    if (needAfterSale && !props.afterSaleId) {
+      openError.value = isMerchantChat.value
+        ? '缺少售后单信息，无法联系商家'
+        : '缺少售后单信息，无法打开客服会话';
+      return;
+    }
+    if (isOrderMerchantChat.value && (!props.orderId || !props.merchantId)) {
+      openError.value = '缺少订单或商家信息，无法联系商家';
+      return;
+    }
+
     if (props.threadType === 'USER_CS') {
       thread.value = await openAfterSaleChat(props.afterSaleId);
     } else if (props.afterSaleId) {
@@ -179,6 +196,20 @@ async function openThread() {
     ElMessage.error(openError.value);
   } finally {
     loading.value = false;
+  }
+}
+
+async function onCloseThread() {
+  if (!thread.value?.id || !threadOpen.value || closing.value) return;
+  closing.value = true;
+  try {
+    thread.value = await closeChatThread(thread.value.id);
+    ElMessage.success('会话已关闭');
+    emit('closed', thread.value);
+  } catch (e) {
+    ElMessage.error(e.message || '关闭会话失败');
+  } finally {
+    closing.value = false;
   }
 }
 
@@ -304,6 +335,16 @@ onUnmounted(stopPoll);
             <span class="meta-state" :class="threadOpen ? 'open' : 'closed'">
               {{ threadOpen ? '进行中' : '已关闭' }}
             </span>
+            <el-button
+              v-if="threadOpen"
+              link
+              type="info"
+              size="small"
+              :loading="closing"
+              @click="onCloseThread"
+            >
+              结束会话
+            </el-button>
           </div>
 
           <div id="user-chat-scroll" class="msg-list">

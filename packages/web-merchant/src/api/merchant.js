@@ -91,3 +91,7 @@ export function fetchMerchantChatMessages(threadId, params) {
 export function sendMerchantChatMessage(threadId, payload) {
   return client.post(`/chat/threads/${threadId}/messages`, payload).then((r) => r.data);
 }
+
+export function closeMerchantChatThread(threadId) {
+  return client.post(`/chat/threads/${threadId}/close`).then((r) => r.data);
+}

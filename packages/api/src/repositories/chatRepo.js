@@ -88,6 +88,43 @@ export async function touchThread(threadId) {
   ]);
 }
 
+/** 将 OPEN 会话置为 CLOSED；已关闭则原样返回 */
+export async function closeThread(threadId) {
+  const now = toMysqlDateTime(new Date());
+  await pool.query(
+    `UPDATE chat_threads SET status = 'CLOSED', updated_at = ? WHERE id = ? AND status = 'OPEN'`,
+    [now, threadId],
+  );
+  return findThreadById(threadId);
+}
+
+export async function listOpenThreadsByAfterSale(afterSaleId, { types } = {}) {
+  const params = [afterSaleId];
+  let sql = `SELECT * FROM chat_threads WHERE after_sale_id = ? AND status = 'OPEN'`;
+  if (types?.length) {
+    sql += ` AND type IN (${types.map(() => '?').join(',')})`;
+    params.push(...types);
+  }
+  sql += ' ORDER BY id ASC';
+  const [rows] = await pool.query(sql, params);
+  return rows.map(mapThread);
+}
+
+/** 订单级商家会话（after_sale_id IS NULL） */
+export async function listOpenOrderMerchantThreads(orderId, { merchantId } = {}) {
+  const params = [orderId];
+  let sql = `
+    SELECT * FROM chat_threads
+    WHERE order_id = ? AND after_sale_id IS NULL AND type = 'USER_MERCHANT' AND status = 'OPEN'
+  `;
+  if (merchantId != null) {
+    sql += ' AND merchant_id = ?';
+    params.push(merchantId);
+  }
+  const [rows] = await pool.query(sql, params);
+  return rows.map(mapThread);
+}
+
 export async function listThreadsForUser(userId, { status, type } = {}) {
   const params = [userId];
   let sql = `SELECT * FROM chat_threads WHERE user_id = ?`;
@@ -95,29 +132,11 @@ export async function listThreadsForUser(userId, { status, type } = {}) {
     sql += ' AND type = ?';
     params.push(type);
   }
-export async function listThreadsForUser(userId, { status, type = 'USER_CS' } = {}) {
-  const params = [userId, type];
-  let sql = 'SELECT * FROM chat_threads WHERE user_id = ? AND type = ?';
   if (status) {
     sql += ' AND status = ?';
     params.push(status);
   }
   sql += ' ORDER BY updated_at DESC';
-  const [rows] = await pool.query(sql, params);
-  return rows.map(mapThread);
-}
-
-export async function listThreadsForMerchant(merchantId, { status } = {}) {
-  const params = [merchantId];
-  let sql = `SELECT t.*
-    FROM chat_threads t
-    INNER JOIN after_sales a ON a.after_sale_id = t.after_sale_id
-    WHERE t.type = 'USER_MERCHANT' AND a.merchant_id = ?`;
-  if (status) {
-    sql += ' AND t.status = ?';
-    params.push(status);
-  }
-  sql += ' ORDER BY t.updated_at DESC';
   const [rows] = await pool.query(sql, params);
   return rows.map(mapThread);
 }

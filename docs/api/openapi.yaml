@@ -1919,6 +1919,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChatMessage'
 
+  /chat/threads/{threadId}/close:
+    post:
+      tags: [chat]
+      summary: 主动关闭会话
+      description: |
+        用户/商家/客服关闭本人有权访问的 OPEN 会话。
+        另：售后进入 REFUNDED/REJECTED 时系统自动关闭关联会话；
+        平台仲裁同意退货（APPROVED）时关闭 USER_CS；
+        订单取消或整单退款时关闭订单级商家会话。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: threadId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已关闭（或本来已关闭）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 无权操作
+        '404':
+          description: 会话不存在
+
   /chat/threads/{threadId}/actions/{actionKey}:
     post:
       tags: [chat]

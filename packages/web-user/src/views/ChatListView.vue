@@ -37,6 +37,7 @@ const chatOrderId = ref(null);
 const chatMerchantId = ref(null);
 const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
+const chatInitialThread = ref(null);
 
 function formatTime(iso) {
   if (!iso) return '-';
@@ -92,6 +93,7 @@ function openChat(row) {
   chatAfterSaleId.value = row.afterSaleId || null;
   chatOrderId.value = row.orderId || null;
   chatMerchantId.value = row.afterSaleId ? null : row.merchantId || null;
+  chatInitialThread.value = row;
   chatVisible.value = true;
 }
 
@@ -116,6 +118,7 @@ async function onEscalateFromList() {
     chatMerchantId.value = null;
     chatAfterSaleId.value = afterSaleId;
     chatOrderId.value = orderId;
+    chatInitialThread.value = null;
     await nextTick();
     chatVisible.value = true;
     await loadThreads();
@@ -235,7 +238,9 @@ onMounted(loadThreads);
       :merchant-id="chatMerchantId"
       :thread-type="chatThreadType"
       :can-escalate="chatCanEscalate"
+      :initial-thread="chatInitialThread"
       @escalate="onEscalateFromList"
+      @closed="loadThreads"
     />
   </div>
 </template>

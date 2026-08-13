@@ -294,6 +294,9 @@ export async function expirePendingOrders() {
       cancelReason: 'PAYMENT_TIMEOUT',
     });
     await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
+    await closeOrderMerchantChatThreads(order.orderId, {
+      notice: '订单已取消，订单沟通会话已关闭。',
+    });
   }
   await autoConfirmShippedOrders();
   await escalateOverdueAfterSales();
@@ -480,12 +483,19 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
     auditedAt: new Date(),
   });
 
+  await closeAfterSaleChatThreads(item.afterSaleId, {
+    notice: '售后已退款完成，相关会话已关闭。',
+  });
+
   const order = await orderRepo.findById(item.orderId);
   if (order && (await isOrderFullyRefundedByAfterSales(order))) {
     await orderRepo.updateOrder(item.orderId, { status: 'REFUNDED' });
     for (const sub of order.subOrders || []) {
       await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDED');
     }
+    await closeOrderMerchantChatThreads(item.orderId, {
+      notice: '订单已退款完成，订单沟通会话已关闭。',
+    });
   } else if (order && !(await orderHasInProgressAfterSale(item.orderId, item.afterSaleId))) {
     // 部分退款完成且无进行中售后：退出 REFUNDING
     if (order.status === 'REFUNDING') {
@@ -509,11 +519,19 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
  */
 async function approveAfterSale(item, { auditReason = null } = {}) {
   if (item.type === 'RETURN_REFUND') {
+    const fromEscalated = item.status === 'ESCALATED';
     const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
       status: 'APPROVED',
       auditReason: auditReason || '同意退货退款，请用户寄回商品',
       auditedAt: new Date(),
     });
+    // 平台仲裁同意退货：客服工单结束；商家会话保留以便寄回沟通
+    if (fromEscalated) {
+      await closeAfterSaleChatThreads(item.afterSaleId, {
+        types: ['USER_CS'],
+        notice: '平台已裁定同意退货退款，客服会话已关闭。寄回问题请联系商家。',
+      });
+    }
     return { afterSale: afterSaleRepo.serialize(updated) };
   }
   return finalizeApprovedAfterSale(item, { auditReason });
@@ -525,6 +543,9 @@ async function closeRejectedAfterSale(item, reason) {
     status: 'REJECTED',
     auditReason: reason?.trim() || null,
     auditedAt: new Date(),
+  });
+  await closeAfterSaleChatThreads(item.afterSaleId, {
+    notice: '售后已拒绝，本轮会话已关闭。如需继续协商可重新联系商家，或申请平台介入。',
   });
   const order = await orderRepo.findById(item.orderId);
   const stillOpen = await orderHasInProgressAfterSale(item.orderId, item.afterSaleId);
@@ -538,6 +559,42 @@ async function closeRejectedAfterSale(item, reason) {
     }
   }
   return { afterSale: afterSaleRepo.serialize(updated) };
+}
+
+/** 关闭售后关联的 OPEN 会话，并写入系统提示 */
+async function closeAfterSaleChatThreads(afterSaleId, { notice, types } = {}) {
+  const threads = await chatRepo.listOpenThreadsByAfterSale(afterSaleId, { types });
+  for (const thread of threads) {
+    if (notice) {
+      await chatRepo.createMessage({
+        threadId: thread.id,
+        senderType: 'SYSTEM',
+        senderId: null,
+        msgType: 'TEXT',
+        content: notice,
+        payload: null,
+      });
+    }
+    await chatRepo.closeThread(thread.id);
+  }
+}
+
+/** 关闭订单级（无售后）商家会话 */
+async function closeOrderMerchantChatThreads(orderId, { notice, merchantId } = {}) {
+  const threads = await chatRepo.listOpenOrderMerchantThreads(orderId, { merchantId });
+  for (const thread of threads) {
+    if (notice) {
+      await chatRepo.createMessage({
+        threadId: thread.id,
+        senderType: 'SYSTEM',
+        senderId: null,
+        msgType: 'TEXT',
+        content: notice,
+        payload: null,
+      });
+    }
+    await chatRepo.closeThread(thread.id);
+  }
 }
 
 /** 领域规则：APPROVED + RETURN_REFUND → RETURNING（用户寄回） */
@@ -1538,6 +1595,9 @@ export async function cancelOrder(userId, orderId) {
     cancelReason: 'USER_CANCEL',
   });
   await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
+  await closeOrderMerchantChatThreads(order.orderId, {
+    notice: '订单已取消，订单沟通会话已关闭。',
+  });
   const updated = await orderRepo.findById(order.orderId);
   return { order: serializeOrder(updated, { includeSubOrders: true }) };
 }
@@ -1952,14 +2012,13 @@ const USER_MERCHANT_CHAT_CREATE_STATUSES = new Set([
   'APPROVED',
   'RETURNING',
 ]);
-/** 商家新建/进入售后会话：含履约中售后与拒绝后协商；仲裁/已退款仅打开已有或建只读会话 */
+/** 商家新建售后会话：终态 REFUNDED 仅可从列表查看已关闭会话，不可再新建 */
 const MERCHANT_CHAT_CREATE_STATUSES = new Set([
   'APPLIED',
   'APPROVED',
   'RETURNING',
   'REJECTED',
   'ESCALATED',
-  'REFUNDED',
 ]);
 
 /**
@@ -2121,6 +2180,31 @@ export async function getChatMessages(actor, threadId, { afterId } = {}) {
   if (denied) return denied;
   const list = await chatRepo.listMessages(threadId, { afterId });
   return { list };
+}
+
+/** 参与方主动关闭会话（用户 / 商家 / 客服） */
+export async function closeChatThread(actor, threadId) {
+  const thread = await chatRepo.findThreadById(threadId);
+  const denied = await assertThreadAccess(actor, thread);
+  if (denied) return denied;
+  if (thread.status !== 'OPEN') {
+    return { thread: await enrichThread(thread), alreadyClosed: true };
+  }
+
+  let who = '用户';
+  if (actor.kind === 'merchant') who = '商家';
+  else if (actor.kind === 'admin') who = '平台客服';
+
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'TEXT',
+    content: `会话已由${who}关闭。`,
+    payload: null,
+  });
+  const closed = await chatRepo.closeThread(thread.id);
+  return { thread: await enrichThread(closed), alreadyClosed: false };
 }
 
 export async function postChatMessage(actor, threadId, body = {}) {

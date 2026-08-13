@@ -23,3 +23,7 @@ export function fetchChatMessages(threadId, params) {
 export function sendChatMessage(threadId, payload) {
   return client.post(`/chat/threads/${threadId}/messages`, payload).then((r) => r.data);
 }
+
+export function closeChatThread(threadId) {
+  return client.post(`/chat/threads/${threadId}/close`).then((r) => r.data);
+}

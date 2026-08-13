@@ -106,6 +106,7 @@ onMounted(loadThreads);
       v-model="chatVisible"
       :after-sale-id="chatAfterSaleId"
       :initial-thread="chatThread"
+      @closed="loadThreads"
     />
   </div>
 </template>
