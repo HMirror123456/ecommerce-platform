@@ -95,11 +95,29 @@ export async function listThreadsForUser(userId, { status, type } = {}) {
     sql += ' AND type = ?';
     params.push(type);
   }
+export async function listThreadsForUser(userId, { status, type = 'USER_CS' } = {}) {
+  const params = [userId, type];
+  let sql = 'SELECT * FROM chat_threads WHERE user_id = ? AND type = ?';
   if (status) {
     sql += ' AND status = ?';
     params.push(status);
   }
   sql += ' ORDER BY updated_at DESC';
+  const [rows] = await pool.query(sql, params);
+  return rows.map(mapThread);
+}
+
+export async function listThreadsForMerchant(merchantId, { status } = {}) {
+  const params = [merchantId];
+  let sql = `SELECT t.*
+    FROM chat_threads t
+    INNER JOIN after_sales a ON a.after_sale_id = t.after_sale_id
+    WHERE t.type = 'USER_MERCHANT' AND a.merchant_id = ?`;
+  if (status) {
+    sql += ' AND t.status = ?';
+    params.push(status);
+  }
+  sql += ' ORDER BY t.updated_at DESC';
   const [rows] = await pool.query(sql, params);
   return rows.map(mapThread);
 }

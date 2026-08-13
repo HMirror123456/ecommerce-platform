@@ -1734,6 +1734,7 @@ paths:
       description: |
         用户对本人售后开聊；商家对本店售后开聊/取会话。
         建议售后状态为 APPLIED 时新建；已有 OPEN 会话可直接返回。
+      summary: 用户开聊或获取已有 USER_MERCHANT 会话（幂等）
       security:
         - bearerAuth: []
       parameters:
@@ -1773,6 +1774,18 @@ paths:
         - bearerAuth: []
       parameters:
         - name: orderId
+          description: 非本人售后
+        '404':
+          description: 售后不存在
+
+  /merchant/after-sales/{afterSaleId}/chat/thread:
+    post:
+      tags: [chat]
+      summary: 商家开聊或获取本店售后的 USER_MERCHANT 会话（幂等）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
           in: path
           required: true
           schema:
@@ -1808,6 +1821,9 @@ paths:
           description: 订单/子单不存在
         '409':
           description: 当前订单状态不允许联系商家
+          description: 非本店售后
+        '404':
+          description: 售后不存在
 
   /chat/threads:
     get:
@@ -1817,6 +1833,7 @@ paths:
         用户：本人会话（可按 type 过滤）；
         商家：本店 USER_MERCHANT；
         CS_AGENT/SUPER_ADMIN：USER_CS 全部。
+      description: 用户仅见自己的 USER_CS；商家仅见本店 USER_MERCHANT；CS_AGENT/SUPER_ADMIN 仅见全部 USER_CS
       security:
         - bearerAuth: []
       parameters:
@@ -1974,6 +1991,7 @@ components:
         shopName:
           type: string
           nullable: true
+          description: USER_MERCHANT 会话由关联售后单解析的所属商家
         status:
           type: string
           enum: [OPEN, CLOSED]
@@ -1996,6 +2014,7 @@ components:
         senderType:
           type: string
           enum: [USER, CS_AGENT, MERCHANT, SYSTEM]
+          enum: [USER, MERCHANT, CS_AGENT, SYSTEM]
         senderId:
           type: integer
           nullable: true

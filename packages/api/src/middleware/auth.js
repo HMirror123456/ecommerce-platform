@@ -81,7 +81,7 @@ export function requireMerchant(req, res, next) {
   })();
 }
 
-/** User or CS_AGENT/SUPER_ADMIN for chat endpoints. */
+/** User, merchant, or CS_AGENT/SUPER_ADMIN for chat endpoints. */
 export function requireUserOrCs(req, res, next) {
   (async () => {
     const header = req.headers.authorization;
@@ -102,6 +102,12 @@ export function requireUserOrCs(req, res, next) {
           return res.status(403).json({ message: '当前角色无此操作权限' });
         }
         req.admin = admin;
+        return next();
+      }
+      if (payload.type === 'merchant') {
+        const merchant = await findMerchantById(payload.sub);
+        if (!merchant) return res.status(401).json({ message: '账号无效' });
+        req.merchant = merchant;
         return next();
       }
       return res.status(403).json({ message: '无权限' });

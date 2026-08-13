@@ -2,14 +2,15 @@
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { auditAfterSale, confirmAfterSaleReturn, getAfterSales } from '@/api/merchant';
+import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
 
 const AFTER_SALE_STATUS_OPTIONS = [
   { label: '待商家处理', value: 'APPLIED', type: 'warning' },
-  { label: '商家已同意', value: 'APPROVED', type: 'success' },
-  { label: '商家已拒绝', value: 'REJECTED', type: 'danger' },
-  { label: '待平台仲裁', value: 'ESCALATED', type: 'primary' },
-  { label: '用户退货中', value: 'RETURNING', type: 'info' },
-  { label: '已退款', value: 'REFUNDED', type: 'success' },
+  { label: '等待用户寄回', value: 'APPROVED', type: 'success' },
+  { label: '售后已拒绝', value: 'REJECTED', type: 'danger' },
+  { label: '平台仲裁中', value: 'ESCALATED', type: 'primary' },
+  { label: '用户已寄回', value: 'RETURNING', type: 'info' },
+  { label: '退款已完成', value: 'REFUNDED', type: 'success' },
 ];
 
 const AFTER_SALE_TYPE_LABELS = {
@@ -23,6 +24,8 @@ const total = ref(0);
 const keyword = ref('');
 const status = ref('');
 const processingId = ref(null);
+const chatAfterSaleId = ref(null);
+const chatVisible = ref(false);
 
 const statusMap = AFTER_SALE_STATUS_OPTIONS.reduce((map, item) => {
   map[item.value] = item;
@@ -83,6 +86,18 @@ function getStatusTagType(value) {
   return statusMap[value]?.type || 'info';
 }
 
+function getStatusDescription(row) {
+  if (row?.status === 'APPLIED') return '请在处理截止前审核该售后申请';
+  if (row?.status === 'APPROVED' && row?.type === 'RETURN_REFUND') return '已同意退货退款，等待用户填写寄回物流并寄回商品';
+  if (row?.status === 'APPROVED') return '商家已同意，仅退款将由系统继续处理';
+  if (row?.status === 'RETURNING') return '用户已寄回商品，等待商家验收后退款';
+  if (row?.status === 'REFUNDED' && row?.type === 'RETURN_REFUND') return '退货验收通过，退款已完成';
+  if (row?.status === 'REFUNDED') return '退款已完成';
+  if (row?.status === 'ESCALATED') return '该售后由平台仲裁，商家不可继续处理';
+  if (row?.status === 'REJECTED') return '商家已拒绝该售后申请';
+  return '-';
+}
+
 function getTypeLabel(value) {
   return AFTER_SALE_TYPE_LABELS[value] || value || '-';
 }
@@ -93,6 +108,20 @@ function getItems(row) {
 
 function getReasonText(row) {
   return row?.reason || '-';
+}
+
+function getReturnShipment(row) {
+  const shipment = row?.returnShipment;
+  if (!shipment) return null;
+  if (typeof shipment === 'string') {
+    try {
+      const parsed = JSON.parse(shipment);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return typeof shipment === 'object' ? shipment : null;
 }
 
 function getReadonlyActionText(row) {
@@ -123,6 +152,24 @@ async function loadAfterSales() {
 function resetFilters() {
   keyword.value = '';
   status.value = '';
+}
+
+function getReturnProgress(row) {
+  if (row?.type !== 'RETURN_REFUND') return '';
+  if (row.status === 'APPROVED') return '待用户寄回商品';
+  if (row.status === 'RETURNING') return '已寄回，待商家验收';
+  if (row.status === 'REFUNDED') return '退货验收通过，退款已完成';
+  return '';
+}
+
+function getChatActionLabel(row) {
+  return ['REJECTED', 'REFUNDED', 'ESCALATED'].includes(row?.status) ? '查看沟通' : '回复用户';
+}
+
+function openChat(row) {
+  if (!row?.afterSaleId) return;
+  chatAfterSaleId.value = Number(row.afterSaleId);
+  chatVisible.value = true;
 }
 
 async function approve(row) {
@@ -282,9 +329,10 @@ onMounted(loadAfterSales);
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="130">
+      <el-table-column label="售后状态" min-width="210">
         <template #default="{ row }">
           <el-tag :type="getStatusTagType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
+          <div class="status-description">{{ getStatusDescription(row) }}</div>
         </template>
       </el-table-column>
       <el-table-column label="申请时间" width="170">
@@ -293,18 +341,21 @@ onMounted(loadAfterSales);
       <el-table-column label="处理截止" width="170">
         <template #default="{ row }">{{ formatTime(row.merchantDeadline) }}</template>
       </el-table-column>
-      <el-table-column label="寄回物流" min-width="180" show-overflow-tooltip>
+      <el-table-column label="用户寄回信息" min-width="230">
         <template #default="{ row }">
-          <span v-if="row.returnShipment">
-            {{ row.returnShipment.logisticsCompany }} {{ row.returnShipment.trackingNo }}
-          </span>
-          <span v-else class="muted">-</span>
+          <div v-if="getReturnProgress(row)" class="return-progress">{{ getReturnProgress(row) }}</div>
+          <div v-if="getReturnShipment(row)" class="shipment-info">
+            <div>物流公司：{{ getReturnShipment(row).logisticsCompany || '-' }}</div>
+            <div>物流单号：{{ getReturnShipment(row).trackingNo || '-' }}</div>
+            <div>寄回时间：{{ formatTime(getReturnShipment(row).shippedAt) }}</div>
+          </div>
+          <span v-else class="muted">{{ row.type === 'RETURN_REFUND' ? '用户暂未填写寄回物流' : '-' }}</span>
         </template>
       </el-table-column>
       <el-table-column label="处理原因" min-width="160" show-overflow-tooltip>
         <template #default="{ row }">{{ row.auditReason || row.rejectReason || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
           <template v-if="row.status === 'APPLIED'">
             <el-button
@@ -330,6 +381,7 @@ onMounted(loadAfterSales);
             <el-button
               link
               type="primary"
+              :disabled="!!processingId && processingId !== row.afterSaleId"
               :loading="processingId === row.afterSaleId"
               @click="confirmReturn(row)"
             >
@@ -337,11 +389,13 @@ onMounted(loadAfterSales);
             </el-button>
           </template>
           <span v-else class="muted">{{ getReadonlyActionText(row) }}</span>
+          <el-button link type="primary" @click="openChat(row)">{{ getChatActionLabel(row) }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <div class="summary">共 {{ filteredList.length }} / {{ total }} 条售后单</div>
+    <AfterSaleChatDrawer v-model="chatVisible" :after-sale-id="chatAfterSaleId" />
   </el-card>
 </template>
 
@@ -380,6 +434,9 @@ onMounted(loadAfterSales);
 .item-title { color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-meta { flex: none; color: #666; }
 .reason-text { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.status-description { margin-top: 6px; color: #666; font-size: 12px; line-height: 18px; }
+.return-progress { margin-bottom: 5px; color: #409eff; font-size: 12px; font-weight: 600; }
+.shipment-info { color: #333; font-size: 13px; line-height: 21px; }
 .muted { color: #999; }
 .summary {
   margin-top: 16px;

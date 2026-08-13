@@ -1859,6 +1859,8 @@ async function enrichThread(thread) {
     afterSaleStatus: null,
     merchantId: thread.merchantId,
     shopName,
+    afterSaleStatus: item ? item.status : null,
+    merchantId: item ? item.merchantId : null,
   };
 }
 
@@ -1888,6 +1890,18 @@ async function assertThreadAccess(actor, thread) {
       if (item && item.merchantId === actor.merchant.id) return null;
     }
     return { error: 'FORBIDDEN', message: '无权访问该会话' };
+  }
+  if (thread.type === 'USER_CS') {
+    if (actor.kind === 'admin') return null;
+    if (actor.kind === 'user' && thread.userId === actor.user.id) return null;
+    return { error: 'FORBIDDEN', message: '无权访问该会话' };
+  }
+  if (thread.type === 'USER_MERCHANT') {
+    if (actor.kind === 'user' && thread.userId === actor.user.id) return null;
+    if (actor.kind === 'merchant') {
+      const item = await afterSaleRepo.findById(thread.afterSaleId);
+      if (item?.merchantId === actor.merchant.id) return null;
+    }
   }
   return { error: 'FORBIDDEN', message: '无权访问该会话' };
 }
@@ -1962,6 +1976,12 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
   if (item.status !== 'APPLIED') {
     return { error: 'INVALID_STATE', message: '当前售后状态不可新建商家会话' };
   }
+async function ensureUserMerchantThread(afterSaleId) {
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+
+  const existing = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
+  if (existing) return { thread: await enrichThread(existing), created: false };
 
   let thread;
   try {
@@ -1985,6 +2005,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
     senderId: null,
     msgType: 'TEXT',
     content: `已接入与「${item.shopName || '商家'}」的沟通，请说明售后问题。协商不成可申请平台介入。`,
+    content: '已建立用户与商家的售后沟通会话，请围绕该售后订单协商处理。',
     payload: null,
   });
   await chatRepo.createMessage({
@@ -2073,6 +2094,24 @@ export async function ensureOrderMerchantThread(userId, orderId, body = {}) {
 }
 
 export async function listChatThreads(actor, { status, type } = {}) {
+  return { thread: await enrichThread(thread), created: true };
+}
+
+export async function ensureUserMerchantThreadForUser(userId, afterSaleId) {
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+  if (item.userId !== userId) return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  return ensureUserMerchantThread(afterSaleId);
+}
+
+export async function ensureUserMerchantThreadForMerchant(merchantId, afterSaleId) {
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+  if (item.merchantId !== merchantId) return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  return ensureUserMerchantThread(afterSaleId);
+}
+
+export async function listChatThreads(actor, { status } = {}) {
   if (actor.kind === 'admin') {
     const list = await chatRepo.listThreadsForCs({ status });
     return Promise.all(list.map(enrichThread));
@@ -2083,6 +2122,10 @@ export async function listChatThreads(actor, { status, type } = {}) {
     return Promise.all(list.map(enrichThread));
   }
   const list = await chatRepo.listThreadsForUser(actor.user.id, { status, type });
+    const list = await chatRepo.listThreadsForMerchant(actor.merchant.id, { status });
+    return Promise.all(list.map(enrichThread));
+  }
+  const list = await chatRepo.listThreadsForUser(actor.user.id, { status });
   return Promise.all(list.map(enrichThread));
 }
 
@@ -2100,6 +2143,16 @@ export async function postChatMessage(actor, threadId, body = {}) {
   if (denied) return denied;
   if (thread.status !== 'OPEN') return { error: 'INVALID', message: '会话已关闭' };
 
+  const afterSale = await afterSaleRepo.findById(thread.afterSaleId);
+  if (!afterSale) return { error: 'NOT_FOUND', message: '关联售后不存在' };
+  if (
+    actor.kind === 'merchant'
+    && thread.type === 'USER_MERCHANT'
+    && ['ESCALATED', 'REFUNDED'].includes(afterSale.status)
+  ) {
+    return { error: 'FORBIDDEN', message: '该售后仅可查看历史沟通，商家不能继续发送消息' };
+  }
+
   const msgType = body.msgType || 'TEXT';
   if (msgType !== 'TEXT' && msgType !== 'CARD') {
     return { error: 'INVALID', message: 'msgType 仅支持 TEXT / CARD' };
@@ -2114,6 +2167,8 @@ export async function postChatMessage(actor, threadId, body = {}) {
     const item = await afterSaleRepo.findById(thread.afterSaleId);
     if (!item) return { error: 'NOT_FOUND', message: '关联售后不存在' };
     payload = payload || buildAfterSaleCardPayload(item);
+  } else {
+    payload = payload || buildAfterSaleCardPayload(afterSale);
     content = content || '售后订单卡片';
   } else {
     const order = await orderRepo.findById(thread.orderId);
@@ -2136,6 +2191,8 @@ export async function postChatMessage(actor, threadId, body = {}) {
     senderId = actor.user.id;
   }
 
+  const senderType = actor.kind === 'admin' ? 'CS_AGENT' : actor.kind === 'merchant' ? 'MERCHANT' : 'USER';
+  const senderId = actor.kind === 'admin' ? actor.admin.id : actor.kind === 'merchant' ? actor.merchant.id : actor.user.id;
   const message = await chatRepo.createMessage({
     threadId,
     senderType,
@@ -2153,6 +2210,7 @@ export async function runChatAction(admin, threadId, actionKey, body = {}) {
   if (thread.type !== 'USER_CS') {
     return { error: 'INVALID', message: '该动作仅适用于平台客服会话' };
   }
+  if (thread.type !== 'USER_CS') return { error: 'FORBIDDEN', message: '该会话不支持客服快捷动作' };
 
   const key = String(actionKey || '').toUpperCase();
   if (key === 'HINT_RETURN') {
