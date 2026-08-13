@@ -26,6 +26,10 @@ export function fetchChatThreads(params) {
   return client.get('/chat/threads', { params }).then((r) => r.data);
 }
 
+export function fetchChatUnreadCount() {
+  return client.get('/chat/unread-count').then((r) => r.data);
+}
+
 export function fetchChatMessages(threadId, params) {
   return client.get(`/chat/threads/${threadId}/messages`, { params }).then((r) => r.data);
 }

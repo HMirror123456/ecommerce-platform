@@ -1938,29 +1938,51 @@ function buildOrderMerchantCardPayload(order, sub) {
   };
 }
 
-async function enrichThread(thread) {
+async function enrichThread(thread, actor = null) {
   if (!thread) return null;
+  let base;
   if (thread.afterSaleId) {
     const item = await afterSaleRepo.findById(thread.afterSaleId);
-    return {
+    base = {
       ...thread,
       afterSaleStatus: item ? item.status : null,
       merchantId: thread.merchantId ?? (item ? item.merchantId : null),
       shopName: item ? item.shopName : null,
     };
+  } else {
+    let shopName = null;
+    if (thread.orderId && thread.merchantId) {
+      const order = await orderRepo.findById(thread.orderId);
+      const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
+      shopName = sub?.shopName || null;
+    }
+    base = {
+      ...thread,
+      afterSaleStatus: null,
+      merchantId: thread.merchantId,
+      shopName,
+    };
   }
-  let shopName = null;
-  if (thread.orderId && thread.merchantId) {
-    const order = await orderRepo.findById(thread.orderId);
-    const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
-    shopName = sub?.shopName || null;
+
+  // 不向前端暴露内部已读游标
+  delete base.userLastReadMsgId;
+  delete base.merchantLastReadMsgId;
+  delete base.csLastReadMsgId;
+
+  if (!actor) {
+    base.unreadCount = 0;
+    return base;
   }
-  return {
-    ...thread,
-    afterSaleStatus: null,
-    merchantId: thread.merchantId,
-    shopName,
-  };
+  const reader =
+    actor.kind === 'merchant' ? 'merchant' : actor.kind === 'admin' ? 'cs' : 'user';
+  base.unreadCount = await chatRepo.countUnreadForReader(thread, reader);
+  return base;
+}
+
+function readerOfActor(actor) {
+  if (actor?.kind === 'merchant') return 'merchant';
+  if (actor?.kind === 'admin') return 'cs';
+  return 'user';
 }
 
 async function assertThreadAccess(actor, thread) {
@@ -2001,13 +2023,30 @@ export async function ensureUserCsThread(userId, afterSaleId) {
 
   const existing = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_CS');
   if (existing) {
-    return { thread: await enrichThread(existing), created: false };
+    return { thread: await enrichThread(existing, { kind: 'user', user: { id: userId } }), created: false };
   }
 
   if (item.status !== 'ESCALATED') {
     return {
       error: 'INVALID_STATE',
       message: '请先申请平台介入后再联系客服',
+    };
+  }
+
+  const latest = await chatRepo.findLatestThreadByAfterSale(afterSaleId, 'USER_CS');
+  if (latest?.status === 'CLOSED') {
+    const reopened = await chatRepo.reopenThread(latest.id);
+    await chatRepo.createMessage({
+      threadId: reopened.id,
+      senderType: 'SYSTEM',
+      senderId: null,
+      msgType: 'TEXT',
+      content: '平台客服会话已重新开启。',
+      payload: null,
+    });
+    return {
+      thread: await enrichThread(reopened, { kind: 'user', user: { id: userId } }),
+      created: true,
     };
   }
 
@@ -2022,7 +2061,9 @@ export async function ensureUserCsThread(userId, afterSaleId) {
     });
   } catch (err) {
     const again = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_CS');
-    if (again) return { thread: await enrichThread(again), created: false };
+    if (again) {
+      return { thread: await enrichThread(again, { kind: 'user', user: { id: userId } }), created: false };
+    }
     throw err;
   }
 
@@ -2043,7 +2084,7 @@ export async function ensureUserCsThread(userId, afterSaleId) {
     payload: buildAfterSaleCardPayload(item),
   });
 
-  return { thread: await enrichThread(thread), created: true };
+  return { thread: await enrichThread(thread, { kind: 'user', user: { id: userId } }), created: true };
 }
 
 /** 用户新建售后商家会话：协商期 + 寄回履约期问物流/地址 */
@@ -2080,7 +2121,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
 
   const existing = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
   if (existing) {
-    return { thread: await enrichThread(existing), created: false };
+    return { thread: await enrichThread(existing, actor), created: false };
   }
 
   const allowed =
@@ -2089,6 +2130,20 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
       : USER_MERCHANT_CHAT_CREATE_STATUSES.has(item.status);
   if (!allowed) {
     return { error: 'INVALID_STATE', message: '当前售后状态不可新建商家会话' };
+  }
+
+  const latest = await chatRepo.findLatestThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
+  if (latest?.status === 'CLOSED') {
+    const reopened = await chatRepo.reopenThread(latest.id);
+    await chatRepo.createMessage({
+      threadId: reopened.id,
+      senderType: 'SYSTEM',
+      senderId: null,
+      msgType: 'TEXT',
+      content: `与「${item.shopName || '商家'}」的协商会话已重新开启。`,
+      payload: null,
+    });
+    return { thread: await enrichThread(reopened, actor), created: true };
   }
 
   let thread;
@@ -2103,7 +2158,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
     });
   } catch (err) {
     const again = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
-    if (again) return { thread: await enrichThread(again), created: false };
+    if (again) return { thread: await enrichThread(again, actor), created: false };
     throw err;
   }
 
@@ -2124,7 +2179,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
     payload: buildAfterSaleCardPayload(item),
   });
 
-  return { thread: await enrichThread(thread), created: true };
+  return { thread: await enrichThread(thread, actor), created: true };
 }
 
 /**
@@ -2203,15 +2258,24 @@ export async function ensureOrderMerchantThread(userId, orderId, body = {}) {
 export async function listChatThreads(actor, { status, type } = {}) {
   if (actor.kind === 'admin') {
     const list = await chatRepo.listThreadsForCs({ status });
-    return Promise.all(list.map(enrichThread));
+    return Promise.all(list.map((t) => enrichThread(t, actor)));
   }
   if (actor.kind === 'merchant') {
     if (type && type !== 'USER_MERCHANT') return [];
     const list = await chatRepo.listThreadsForMerchant(actor.merchant.id, { status });
-    return Promise.all(list.map(enrichThread));
+    return Promise.all(list.map((t) => enrichThread(t, actor)));
   }
   const list = await chatRepo.listThreadsForUser(actor.user.id, { status, type });
-  return Promise.all(list.map(enrichThread));
+  return Promise.all(list.map((t) => enrichThread(t, actor)));
+}
+
+export async function getChatUnreadCount(actor) {
+  if (actor.kind === 'user') {
+    return { unreadCount: await chatRepo.sumUnreadForUser(actor.user.id) };
+  }
+  const list = await listChatThreads(actor, { status: 'OPEN' });
+  const unreadCount = list.reduce((sum, t) => sum + (Number(t.unreadCount) || 0), 0);
+  return { unreadCount };
 }
 
 export async function getChatMessages(actor, threadId, { afterId } = {}) {
@@ -2219,6 +2283,15 @@ export async function getChatMessages(actor, threadId, { afterId } = {}) {
   const denied = await assertThreadAccess(actor, thread);
   if (denied) return denied;
   const list = await chatRepo.listMessages(threadId, { afterId });
+  if (list.length) {
+    await chatRepo.markThreadRead(threadId, readerOfActor(actor), list[list.length - 1].id);
+  } else if (!afterId) {
+    // 首次拉取无增量：把游标推到当前末尾（含仅有己方/系统消息的情况）
+    const all = await chatRepo.listMessages(threadId, {});
+    if (all.length) {
+      await chatRepo.markThreadRead(threadId, readerOfActor(actor), all[all.length - 1].id);
+    }
+  }
   return { list };
 }
 

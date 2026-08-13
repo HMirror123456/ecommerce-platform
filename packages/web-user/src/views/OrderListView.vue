@@ -108,6 +108,18 @@ function goDetail(orderId, hash) {
   });
 }
 
+const AFTER_SALE_FOCUS_LABELS = {
+  APPLIED: '待商家处理',
+  APPROVED: '待寄回',
+  RETURNING: '退货中',
+  ESCALATED: '仲裁中',
+};
+
+function afterSaleFocusLabel(order) {
+  if (!order.activeAfterSaleCount || !order.afterSaleFocusStatus) return '';
+  return AFTER_SALE_FOCUS_LABELS[order.afterSaleFocusStatus] || '售后中';
+}
+
 function afterSaleActionLabel(order) {
   if (order.activeAfterSaleCount > 0) {
     if (order.afterSaleFocusStatus === 'ESCALATED') return '平台仲裁中';
@@ -232,6 +244,9 @@ onUnmounted(() => {
           <div class="status-wrap">
             <span class="status-pill" :class="STATUS_TONE[order.status] || 'muted'">
               {{ STATUS_LABELS[order.status] || order.status }}
+            </span>
+            <span v-if="afterSaleFocusLabel(order)" class="after-sale-hint">
+              售后：{{ afterSaleFocusLabel(order) }}
             </span>
             <span
               v-if="order.status === 'PENDING_PAYMENT' && paymentRemainText(order)"
@@ -427,6 +442,18 @@ onUnmounted(() => {
 .status-pill.primary { background: #fff1f0; color: var(--color-primary); }
 .status-pill.success { background: #f6ffed; color: #389e0d; }
 .status-pill.muted { background: #f5f5f5; color: var(--text-muted); }
+
+.after-sale-hint {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #fff7e6;
+  color: #d48806;
+  border: 1px solid #ffd591;
+}
 
 .pay-countdown {
   font-size: 12px;

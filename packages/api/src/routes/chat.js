@@ -6,6 +6,7 @@ import {
   closeChatThread,
   getAfterSaleChatThread,
   getChatMessages,
+  getChatUnreadCount,
   listChatThreads,
   postChatMessage,
   runChatAction,
@@ -136,6 +137,15 @@ router.get('/chat/threads', requireUserMerchantOrCs, async (req, res, next) => {
       type: req.query.type || undefined,
     });
     res.json({ list });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/chat/unread-count', requireUserMerchantOrCs, async (req, res, next) => {
+  try {
+    const result = await getChatUnreadCount(chatActor(req));
+    res.json(result);
   } catch (err) {
     next(err);
   }

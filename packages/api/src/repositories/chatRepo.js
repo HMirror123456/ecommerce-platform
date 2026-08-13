@@ -21,6 +21,10 @@ function mapThread(row) {
     userId: row.user_id,
     merchantId: row.merchant_id == null ? null : row.merchant_id,
     status: row.status,
+    userLastReadMsgId: row.user_last_read_msg_id == null ? null : Number(row.user_last_read_msg_id),
+    merchantLastReadMsgId:
+      row.merchant_last_read_msg_id == null ? null : Number(row.merchant_last_read_msg_id),
+    csLastReadMsgId: row.cs_last_read_msg_id == null ? null : Number(row.cs_last_read_msg_id),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -105,6 +109,72 @@ export async function closeThread(threadId) {
     [now, threadId],
   );
   return findThreadById(threadId);
+}
+
+/** 重新打开已关闭会话（同售后仅一条记录，唯一键约束下不能再建） */
+export async function reopenThread(threadId) {
+  const now = toMysqlDateTime(new Date());
+  await pool.query(
+    `UPDATE chat_threads SET status = 'OPEN', updated_at = ? WHERE id = ? AND status = 'CLOSED'`,
+    [now, threadId],
+  );
+  return findThreadById(threadId);
+}
+
+/**
+ * 标记已读到指定消息 id（只向前推进）
+ * reader: 'user' | 'merchant' | 'cs'
+ */
+export async function markThreadRead(threadId, reader, msgId) {
+  if (!msgId || msgId <= 0) return;
+  const col =
+    reader === 'merchant'
+      ? 'merchant_last_read_msg_id'
+      : reader === 'cs'
+        ? 'cs_last_read_msg_id'
+        : 'user_last_read_msg_id';
+  await pool.query(
+    `UPDATE chat_threads
+     SET ${col} = GREATEST(COALESCE(${col}, 0), ?)
+     WHERE id = ?`,
+    [Number(msgId), threadId],
+  );
+}
+
+/** 对方未读条数：用户看商家/客服；商家看用户；客服看用户（不含 SYSTEM） */
+export async function countUnreadForReader(thread, reader) {
+  if (!thread) return 0;
+  let afterId = 0;
+  let senderFilter = '';
+  if (reader === 'user') {
+    afterId = thread.userLastReadMsgId || 0;
+    senderFilter = `AND sender_type IN ('MERCHANT', 'CS_AGENT')`;
+  } else if (reader === 'merchant') {
+    afterId = thread.merchantLastReadMsgId || 0;
+    senderFilter = `AND sender_type = 'USER'`;
+  } else {
+    afterId = thread.csLastReadMsgId || 0;
+    senderFilter = `AND sender_type = 'USER'`;
+  }
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS cnt FROM chat_messages
+     WHERE thread_id = ? AND id > ? ${senderFilter}`,
+    [thread.id, afterId],
+  );
+  return Number(rows[0]?.cnt) || 0;
+}
+
+export async function sumUnreadForUser(userId) {
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS cnt
+     FROM chat_messages m
+     INNER JOIN chat_threads t ON t.id = m.thread_id
+     WHERE t.user_id = ?
+       AND m.id > COALESCE(t.user_last_read_msg_id, 0)
+       AND m.sender_type IN ('MERCHANT', 'CS_AGENT')`,
+    [userId],
+  );
+  return Number(rows[0]?.cnt) || 0;
 }
 
 export async function listOpenThreadsByAfterSale(afterSaleId, { types } = {}) {
