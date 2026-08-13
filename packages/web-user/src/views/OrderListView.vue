@@ -100,8 +100,27 @@ function onStatusChange(value) {
   }
 }
 
-function goDetail(orderId) {
-  router.push({ name: 'order-detail', params: { orderId } });
+function goDetail(orderId, hash) {
+  router.push({
+    name: 'order-detail',
+    params: { orderId },
+    hash: hash || undefined,
+  });
+}
+
+function afterSaleActionLabel(order) {
+  if (order.activeAfterSaleCount > 0) {
+    if (order.afterSaleFocusStatus === 'ESCALATED') return '平台仲裁中';
+    if (order.afterSaleFocusStatus === 'APPROVED') return '去填写寄回';
+    if (order.afterSaleFocusStatus === 'RETURNING') return '售后处理中';
+    return '售后处理中';
+  }
+  if (['SHIPPED', 'COMPLETED', 'REFUNDING'].includes(order.status)) return '申请售后';
+  return '';
+}
+
+function goAfterSale(order) {
+  goDetail(order.orderId, '#after-sales');
 }
 
 function goPay(orderId) {
@@ -265,6 +284,14 @@ onUnmounted(() => {
               @click="goDetail(order.orderId)"
             >
               去确认收货
+            </el-button>
+            <el-button
+              v-if="afterSaleActionLabel(order)"
+              type="warning"
+              plain
+              @click="goAfterSale(order)"
+            >
+              {{ afterSaleActionLabel(order) }}
             </el-button>
             <el-button
               v-if="order.items?.length && order.status !== 'PENDING_PAYMENT'"

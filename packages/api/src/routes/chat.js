@@ -4,6 +4,7 @@ import {
   ensureUserMerchantThread,
   ensureOrderMerchantThread,
   closeChatThread,
+  getAfterSaleChatThread,
   getChatMessages,
   listChatThreads,
   postChatMessage,
@@ -39,6 +40,18 @@ router.post('/after-sales/:afterSaleId/chat/thread', requireUser, async (req, re
   }
 });
 
+router.get('/after-sales/:afterSaleId/chat/thread', requireUserMerchantOrCs, async (req, res, next) => {
+  try {
+    const result = await getAfterSaleChatThread(chatActor(req), Number(req.params.afterSaleId), 'USER_CS');
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.json(result.thread);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post(
   '/after-sales/:afterSaleId/merchant-chat/thread',
   requireUserMerchantOrCs,
@@ -56,6 +69,29 @@ router.post(
       if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
       if (result.error) return res.status(400).json({ message: result.message });
       res.status(result.created ? 201 : 200).json(result.thread);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.get(
+  '/after-sales/:afterSaleId/merchant-chat/thread',
+  requireUserMerchantOrCs,
+  async (req, res, next) => {
+    try {
+      if (req.admin) {
+        return res.status(403).json({ message: '平台客服请使用 USER_CS 会话' });
+      }
+      const result = await getAfterSaleChatThread(
+        chatActor(req),
+        Number(req.params.afterSaleId),
+        'USER_MERCHANT',
+      );
+      if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+      if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+      if (result.error) return res.status(400).json({ message: result.message });
+      res.json(result.thread);
     } catch (err) {
       next(err);
     }

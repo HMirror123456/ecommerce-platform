@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -12,6 +12,7 @@ import {
   submitAfterSaleReturn,
 } from '@/api/order';
 import { addCartItem } from '@/api/cart';
+import { getAfterSaleChatThread, getMerchantChatThread } from '@/api/chat';
 import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
 
 const ORDER_STATUS_LABELS = {
@@ -68,6 +69,7 @@ const chatOrderId = ref(null);
 const chatMerchantId = ref(null);
 const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
+const chatInitialThread = ref(null);
 const merchantChatTarget = ref(null);
 
 /** 驱动支付倒计时刷新 */
@@ -524,6 +526,11 @@ function merchantChatButtonLabel(afterSale) {
   return '联系商家协商';
 }
 
+/** 已拒绝/已退款：回看历史（拒绝后仍可另开「联系商家协商」） */
+function canViewChatHistory(afterSale) {
+  return afterSale?.status === 'REFUNDED' || afterSale?.status === 'REJECTED';
+}
+
 function canContactShop(sub) {
   if (!order.value || !sub) return false;
   if (['CANCELLED', 'REFUNDED'].includes(order.value.status)) return false;
@@ -534,6 +541,7 @@ function openCsChat(afterSale) {
   chatThreadType.value = 'USER_CS';
   chatCanEscalate.value = false;
   merchantChatTarget.value = null;
+  chatInitialThread.value = null;
   chatAfterSaleId.value = afterSale.afterSaleId;
   chatOrderId.value = null;
   chatMerchantId.value = null;
@@ -544,6 +552,7 @@ function openMerchantChatDrawer(afterSale) {
   chatThreadType.value = 'USER_MERCHANT';
   chatCanEscalate.value = canEscalate(afterSale);
   merchantChatTarget.value = afterSale;
+  chatInitialThread.value = null;
   chatAfterSaleId.value = afterSale.afterSaleId;
   chatOrderId.value = null;
   chatMerchantId.value = null;
@@ -554,10 +563,35 @@ function openShopChat(sub) {
   chatThreadType.value = 'USER_MERCHANT';
   chatCanEscalate.value = false;
   merchantChatTarget.value = null;
+  chatInitialThread.value = null;
   chatAfterSaleId.value = null;
   chatOrderId.value = order.value.orderId;
   chatMerchantId.value = sub.merchantId;
   chatVisible.value = true;
+}
+
+async function openChatHistory(afterSale) {
+  try {
+    let thread = null;
+    let type = 'USER_MERCHANT';
+    try {
+      thread = await getMerchantChatThread(afterSale.afterSaleId);
+      type = 'USER_MERCHANT';
+    } catch {
+      thread = await getAfterSaleChatThread(afterSale.afterSaleId);
+      type = 'USER_CS';
+    }
+    chatThreadType.value = type;
+    chatCanEscalate.value = false;
+    merchantChatTarget.value = null;
+    chatInitialThread.value = thread;
+    chatAfterSaleId.value = afterSale.afterSaleId;
+    chatOrderId.value = null;
+    chatMerchantId.value = null;
+    chatVisible.value = true;
+  } catch (e) {
+    ElMessage.warning(e.message || '暂无沟通记录');
+  }
 }
 
 async function onEscalateFromChat() {
@@ -598,8 +632,15 @@ async function onSubmitReturn() {
   }
 }
 
-onMounted(() => {
-  loadOrder();
+async function scrollToAfterSalesIfNeeded() {
+  if (route.hash !== '#after-sales') return;
+  await nextTick();
+  document.getElementById('after-sales')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+onMounted(async () => {
+  await loadOrder();
+  await scrollToAfterSalesIfNeeded();
   tickTimer = setInterval(() => {
     nowMs.value = Date.now();
   }, 1000);
@@ -752,7 +793,7 @@ onUnmounted(() => {
         </div>
       </el-card>
 
-      <el-card shadow="never" class="section-card">
+      <el-card id="after-sales" shadow="never" class="section-card">
         <template #header>
           <div class="card-header">
             <span class="card-title">售后记录</span>
@@ -819,6 +860,15 @@ onUnmounted(() => {
               @click="openReturnDialog(as)"
             >
               填写寄回物流
+            </el-button>
+            <el-button
+              v-if="canViewChatHistory(as)"
+              link
+              type="primary"
+              size="small"
+              @click="openChatHistory(as)"
+            >
+              查看沟通记录
             </el-button>
           </div>
         </div>
@@ -915,6 +965,7 @@ onUnmounted(() => {
       :merchant-id="chatMerchantId"
       :thread-type="chatThreadType"
       :can-escalate="chatCanEscalate"
+      :initial-thread="chatInitialThread"
       @escalate="onEscalateFromChat"
     />
   </div>

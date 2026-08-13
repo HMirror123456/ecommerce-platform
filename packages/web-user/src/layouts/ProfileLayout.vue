@@ -17,7 +17,7 @@ const menus = [
   { name: 'profile', label: '个人信息', path: '/user', icon: User },
   { name: 'user-orders', label: '我的订单', path: '/user/orders', icon: ShoppingBag },
   { name: 'user-favorites', label: '我的收藏', path: '/user/favorites', icon: Goods },
-  { name: 'user-chats', label: '售后会话', path: '/user/chats', icon: ChatDotRound },
+  { name: 'user-chats', label: '沟通会话', path: '/user/chats', icon: ChatDotRound },
   { name: 'user-addresses', label: '收货地址', path: '/user/addresses', icon: Location },
 ];
 
@@ -25,6 +25,7 @@ const orderShortcuts = [
   { label: '待支付', status: 'PENDING_PAYMENT' },
   { label: '待发货', status: 'PENDING_SHIPMENT' },
   { label: '待收货', status: 'SHIPPED' },
+  { label: '退款/售后', status: 'REFUNDING' },
   { label: '已完成', status: 'COMPLETED' },
 ];
 

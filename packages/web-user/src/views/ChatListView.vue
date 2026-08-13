@@ -139,8 +139,8 @@ onMounted(loadThreads);
   <div class="chat-list-page" v-loading="loading">
     <div class="page-header">
       <div>
-        <h2 class="page-title">我的售后会话</h2>
-        <p class="page-subtitle">与平台客服、商家的售后沟通记录</p>
+        <h2 class="page-title">沟通会话</h2>
+        <p class="page-subtitle">与商家、平台客服的订单与售后沟通记录</p>
       </div>
     </div>
 

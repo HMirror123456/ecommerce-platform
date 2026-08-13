@@ -48,6 +48,15 @@ export async function findOpenThreadByAfterSale(afterSaleId, type = 'USER_CS') {
   return mapThread(rows[0]);
 }
 
+/** 取该售后某类型最近一条会话（含已关闭，用于查看历史） */
+export async function findLatestThreadByAfterSale(afterSaleId, type = 'USER_CS') {
+  const [rows] = await pool.query(
+    `SELECT * FROM chat_threads WHERE after_sale_id = ? AND type = ? ORDER BY updated_at DESC, id DESC LIMIT 1`,
+    [afterSaleId, type],
+  );
+  return mapThread(rows[0]);
+}
+
 export async function findOpenThreadByOrderMerchant(orderId, merchantId, type = 'USER_MERCHANT') {
   const [rows] = await pool.query(
     `SELECT * FROM chat_threads
@@ -107,6 +116,16 @@ export async function listOpenThreadsByAfterSale(afterSaleId, { types } = {}) {
   }
   sql += ' ORDER BY id ASC';
   const [rows] = await pool.query(sql, params);
+  return rows.map(mapThread);
+}
+
+/** 售后已 ESCALATED 但仍 OPEN 的商家会话（超时升级收口） */
+export async function listOpenMerchantThreadsForEscalatedAfterSales() {
+  const [rows] = await pool.query(
+    `SELECT t.* FROM chat_threads t
+     INNER JOIN after_sales a ON a.after_sale_id = t.after_sale_id
+     WHERE t.type = 'USER_MERCHANT' AND t.status = 'OPEN' AND a.status = 'ESCALATED'`,
+  );
   return rows.map(mapThread);
 }
 

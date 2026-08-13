@@ -41,7 +41,8 @@
 |------|------|
 | 开聊 | 用户对售后调用 `POST /after-sales/{id}/chat/thread`：已有 OPEN 直接返回；**新建仅 `ESCALATED`**（与「联系平台客服」一致）；「申请平台介入」成功后自动建会话 |
 | 一人一单 | 同一 `afterSaleId` 仅一条 OPEN 的 `USER_CS`（关闭后可因再次升级再建） |
-| 关闭 | 售后 `REFUNDED`/`REJECTED` 自动关闭；平台仲裁同意退货（→`APPROVED`）仅关 `USER_CS`；参与方可 `POST /chat/threads/{id}/close` |
+| 关闭 | 售后 `REFUNDED`/`REJECTED` 自动关闭；**升级仲裁时关闭商家会话**；平台仲裁同意退货（→`APPROVED`）仅关 `USER_CS`；参与方可 `POST /chat/threads/{id}/close` |
+| 仲裁禁言 | 售后 `ESCALATED`/`REFUNDED` 时售后商家会话双方不可再发消息；请走 `USER_CS` |
 | 鉴权 | 用户仅本人会话；`CS_AGENT`/`SUPER_ADMIN` 可进全部 `USER_CS` |
 | 传输 | HTTP 发消息 + 客户端 3–5s 轮询 `messages?afterId=`；无 WebSocket |
 | 快捷动作 | 仅客服：`CS_APPROVE` / `CS_REJECT` → 已有 arbitrate；`HINT_RETURN` → 仅 SYSTEM 文案 |
@@ -55,7 +56,7 @@
 
 | 端 | 入口 |
 |----|------|
-| web-user | 订单详情售后区「联系平台客服」；个人中心「客服会话」 |
+| web-user | 订单详情售后区「联系平台客服」；个人中心「沟通会话」 |
 | web-admin | 菜单「售后会话」；快捷仲裁按钮 |
 
 ---
@@ -87,7 +88,8 @@
 |------|------|
 | 售后开聊 | `POST /after-sales/{id}/merchant-chat/thread`（及商家 `POST /merchant/after-sales/{id}/chat/thread`）；已有 OPEN 直接返回。用户新建允许 `APPLIED`/`REJECTED`/`APPROVED`/`RETURNING`；商家可在 `APPLIED`/`APPROVED`/`RETURNING`/`REJECTED`/`ESCALATED` 新建或进入。`ESCALATED`/`REFUNDED` 时商家发消息被服务端拒绝 |
 | 订单开聊 | `POST /orders/{orderId}/merchant-chat/thread`（body: `merchantId` 或 `subOrderId`）；订单属本人且目标子单/整单为待发货等可沟通状态 |
-| 关闭 | 售后 `REFUNDED`/`REJECTED` 自动关闭关联会话；整单退款/取消关闭订单级商家会话；参与方可主动结束。拒绝后可重新联系商家（新建 OPEN） |
+| 关闭 | 售后 `REFUNDED`/`REJECTED` 自动关闭；升级 `ESCALATED` 关闭商家会话；整单退款/取消关闭订单级会话；可主动结束。拒绝后可重新联系商家（新建 OPEN） |
+| 查看历史 | `GET /after-sales/{id}/merchant-chat/thread`、`GET .../chat/thread` 返回最近会话（含 CLOSED），不新建 |
 | 鉴权 | 用户仅本人；商家仅本店 `merchantId` 匹配的会话 |
 | 传输 | 与 USER_CS 相同：HTTP + `afterId` 轮询 |
 | 卡片 | 售后会话发卡含售后摘要；订单会话发卡含订单/店铺摘要 |
