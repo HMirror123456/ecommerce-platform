@@ -1,8 +1,8 @@
 # 售后沟通 / 客服会话（Chat）
 
 > 与 `DOMAIN_MODEL.md`、`ADMIN.md`、`openapi.yaml` 配套。  
-> **本次交付：** 用户 ↔ 平台客服（`USER_CS`）可实现。  
-> **仅需求、不实现：** 用户 ↔ 商家（`USER_MERCHANT`），由成员 A/B 后续排期。
+> **本次交付：** 用户 ↔ 平台客服（`USER_CS`）与商家端用户 ↔ 商家（`USER_MERCHANT`）基础沟通可实现。
+> 用户端「联系商家」入口由成员 A 后续接入。
 
 ## 1. 用户 ↔ 平台客服（USER_CS）— 要实现
 
@@ -57,9 +57,9 @@
 
 ---
 
-## 2. 预留：用户 ↔ 商家（USER_MERCHANT）— 仅功能要求，本次不交付代码
+## 2. 用户 ↔ 商家（USER_MERCHANT）— 基础沟通
 
-> **负责人：** 成员 A（用户端）+ 成员 B（商家端）。**状态：未排期。**
+> **负责人：** 成员 A（用户端）+ 成员 B（商家端）。**当前交付：** 后端、商家端入口和聊天抽屉；用户端入口待成员 A 接入。
 
 ### 2.1 目标
 
@@ -68,22 +68,22 @@
 ### 2.2 建议模型
 
 - `ChatThread.type = USER_MERCHANT`
-- 绑定 `afterSaleId`、`orderId`、`userId`、`merchantId`
+- 绑定 `afterSaleId`、`orderId`、`userId`；`merchantId` 通过关联售后单解析，避免冗余存储
 - 同一售后仅一条 OPEN 会话
 - 消息 `senderType`：`USER` / `MERCHANT` / `SYSTEM`
 
 ### 2.3 建议能力
 
 - 文字消息；订单/售后摘要卡片
-- 商家快捷：同意/拒绝售后（对接已有 `POST /merchant/after-sales/{id}/audit`），并写 SYSTEM 消息
+- 商家可发送文字消息；售后审核仍通过现有售后处理页，不在聊天中绕过状态机
 - 用户侧展示商家回复；可选「仍要申请平台介入」跳转现有 escalate
 
 ### 2.4 建议入口
 
 | 端 | 入口 |
 |----|------|
-| web-user | 售后详情「联系商家」 |
-| web-merchant | 售后列表/详情「回复用户」 |
+| web-user | 售后详情「联系商家」（待成员 A 接入） |
+| web-merchant | 售后列表「回复用户」抽屉 |
 
 ### 2.5 非目标（与 USER_CS 相同）
 

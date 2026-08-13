@@ -14,9 +14,9 @@ import {
 
 const PRODUCT_STATUS_OPTIONS = [
   { label: '草稿', value: 'DRAFT', type: 'info' },
-  { label: '待审核', value: 'PENDING_AUDIT', type: 'warning' },
+  { label: '待平台审核', value: 'PENDING_AUDIT', type: 'warning' },
   { label: '已上架', value: 'ON_SHELF', type: 'success' },
-  { label: '已驳回', value: 'REJECTED', type: 'danger' },
+  { label: '审核驳回', value: 'REJECTED', type: 'danger' },
   { label: '已下架', value: 'OFF_SHELF', type: 'info' },
 ];
 

@@ -1,18 +1,21 @@
 import { Router } from 'express';
 import {
   ensureUserCsThread,
+  ensureUserMerchantThreadForMerchant,
+  ensureUserMerchantThreadForUser,
   getChatMessages,
   listChatThreads,
   postChatMessage,
   runChatAction,
 } from '../data/store.js';
-import { requireAdmin, requireUser, requireUserOrCs } from '../middleware/auth.js';
+import { requireAdmin, requireMerchant, requireUser, requireUserOrCs } from '../middleware/auth.js';
 
 const router = Router();
 
 function chatActor(req) {
   if (req.admin) return { kind: 'admin', admin: req.admin };
   if (req.user) return { kind: 'user', user: req.user };
+  if (req.merchant) return { kind: 'merchant', merchant: req.merchant };
   return null;
 }
 
@@ -23,6 +26,30 @@ router.post('/after-sales/:afterSaleId/chat/thread', requireUser, async (req, re
     if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
     if (result.error) return res.status(400).json({ message: result.message });
     res.status(result.created ? 201 : 200).json(result.thread);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/after-sales/:afterSaleId/merchant-chat/thread', requireUser, async (req, res, next) => {
+  try {
+    const result = await ensureUserMerchantThreadForUser(req.user.id, Number(req.params.afterSaleId));
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    return res.status(result.created ? 201 : 200).json(result.thread);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/merchant/after-sales/:afterSaleId/chat/thread', requireMerchant, async (req, res, next) => {
+  try {
+    const result = await ensureUserMerchantThreadForMerchant(req.merchant.id, Number(req.params.afterSaleId));
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    return res.status(result.created ? 201 : 200).json(result.thread);
   } catch (err) {
     next(err);
   }

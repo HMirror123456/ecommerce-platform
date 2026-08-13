@@ -75,3 +75,15 @@ export function auditAfterSale(afterSaleId, data) {
 export function confirmAfterSaleReturn(afterSaleId) {
   return client.post(`/merchant/after-sales/${afterSaleId}/confirm-return`).then((r) => r.data);
 }
+
+export function openMerchantAfterSaleChat(afterSaleId) {
+  return client.post(`/merchant/after-sales/${afterSaleId}/chat/thread`).then((r) => r.data);
+}
+
+export function fetchMerchantChatMessages(threadId, params) {
+  return client.get(`/chat/threads/${threadId}/messages`, { params }).then((r) => r.data);
+}
+
+export function sendMerchantChatMessage(threadId, payload) {
+  return client.post(`/chat/threads/${threadId}/messages`, payload).then((r) => r.data);
+}

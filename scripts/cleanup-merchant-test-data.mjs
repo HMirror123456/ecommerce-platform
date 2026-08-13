@@ -14,6 +14,7 @@ const productTitlePrefixes = [
   '权限验证-',
   '售后验证-',
   '发货验证-',
+  '演示数据：',
 ];
 
 const productDescriptionPrefixes = [
@@ -23,6 +24,7 @@ const productDescriptionPrefixes = [
   '权限验证-',
   '售后验证-',
   '发货验证-',
+  '演示数据：',
 ];
 
 const orderRemarkPrefixes = [
@@ -37,6 +39,7 @@ const orderRemarkPrefixes = [
   '权限验证-',
   '售后验证-',
   '发货验证-',
+  '演示数据：',
 ];
 
 const afterSaleReasonPrefixes = [
@@ -299,6 +302,17 @@ async function executeCleanup(plan) {
   const deleted = {};
   try {
     await conn.beginTransaction();
+    if (plan.afterSaleIds.length && await tableExists('chat_threads')) {
+      const [threadRows] = await conn.query(
+        `SELECT id FROM chat_threads WHERE after_sale_id IN (${placeholders(plan.afterSaleIds)})`,
+        plan.afterSaleIds,
+      );
+      const threadIds = uniqueNumbers(threadRows.map((row) => row.id));
+      if (threadIds.length && await tableExists('chat_messages')) {
+        await deleteByIds(conn, 'chat_messages', 'thread_id', threadIds);
+      }
+      await deleteByIds(conn, 'chat_threads', 'id', threadIds);
+    }
     deleted.afterSales = await deleteByIds(conn, 'after_sales', 'after_sale_id', plan.afterSaleIds);
     deleted.payments = await deleteByIds(conn, 'payments', 'order_id', plan.orderIds);
     deleted.orderItems = await deleteByIds(conn, 'order_items', 'order_id', plan.orderIds);
@@ -336,7 +350,7 @@ async function executeCleanup(plan) {
 function printPlan(plan) {
   console.log('Merchant test data cleanup scope:');
   console.log('- Legacy products:', 'merchant batch, merchant product flow');
-  console.log('- New test prefixes:', '演示验证-, 批量验证-, 生命周期验证-, 权限验证-, 售后验证-, 发货验证-');
+  console.log('- New test prefixes:', '演示验证-, 演示数据：, 批量验证-, 生命周期验证-, 权限验证-, 售后验证-, 发货验证-');
   console.log('- Legacy logistics:', 'VERIFY物流, PERM*, VFY*');
   console.log('- Onboarding applications created by verification scripts');
   console.log('');
