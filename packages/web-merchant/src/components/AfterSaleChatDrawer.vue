@@ -7,6 +7,7 @@ import {
   openMerchantAfterSaleChat,
   sendMerchantChatMessage,
 } from '@/api/merchant';
+import { getAfterSaleCommunicationMode } from '@/utils/afterSaleCommunication';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -14,7 +15,7 @@ const props = defineProps({
   /** 订单级等无售后会话：直接传入列表中的 thread */
   initialThread: { type: Object, default: null },
 });
-const emit = defineEmits(['update:modelValue', 'closed']);
+const emit = defineEmits(['update:modelValue', 'closed', 'read']);
 
 const loading = ref(false);
 const thread = ref(null);
@@ -23,15 +24,6 @@ const draft = ref('');
 const sending = ref(false);
 const closing = ref(false);
 let pollTimer = null;
-
-const STATUS_LABELS = {
-  APPLIED: '待商家处理',
-  APPROVED: '等待用户寄回',
-  RETURNING: '用户已寄回，待商家验收',
-  REFUNDED: '退款已完成',
-  REJECTED: '售后已拒绝',
-  ESCALATED: '平台仲裁中',
-};
 
 const TYPE_LABELS = {
   REFUND_ONLY: '仅退款',
@@ -58,7 +50,7 @@ function isMine(message) {
 }
 
 function statusLabel(status) {
-  return STATUS_LABELS[status] || status || '-';
+  return getAfterSaleCommunicationMode(status).displayText;
 }
 
 function typeLabel(type) {
@@ -69,24 +61,20 @@ const threadOpen = computed(() => thread.value?.status === 'OPEN');
 
 function isReadOnlyThread() {
   if (!threadOpen.value) return true;
-  return ['REFUNDED', 'ESCALATED'].includes(thread.value?.afterSaleStatus);
+  return getAfterSaleCommunicationMode(thread.value?.afterSaleStatus).isReadOnly;
 }
 
 function readOnlyHint() {
   if (!threadOpen.value) return '会话已关闭，无法继续发送';
-  if (thread.value?.afterSaleStatus === 'ESCALATED') {
-    return '该售后已进入平台仲裁，商家仅可查看历史沟通';
-  }
-  if (thread.value?.afterSaleStatus === 'REFUNDED') {
-    return '售后已完成，仅查看沟通记录';
-  }
+  const communicationMode = getAfterSaleCommunicationMode(thread.value?.afterSaleStatus);
+  if (communicationMode.isReadOnly) return `${communicationMode.displayText}，商家仅可查看历史沟通`;
   return '';
 }
 
 function metaLine() {
   if (!thread.value) return '';
   if (thread.value.afterSaleId) {
-    return `订单 ${thread.value.orderNo} · 售后 #${thread.value.afterSaleId} · ${statusLabel(thread.value.afterSaleStatus)}`;
+    return `售后沟通 · 售后单 #${thread.value.afterSaleId} · ${statusLabel(thread.value.afterSaleStatus)}`;
   }
   return `订单 ${thread.value.orderNo} · 订单沟通`;
 }
@@ -110,16 +98,17 @@ async function loadMessages(reset) {
 async function openThread() {
   loading.value = true;
   try {
-    if (props.afterSaleId) {
-      thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
-    } else if (props.initialThread?.id) {
+    if (props.initialThread?.id) {
       thread.value = props.initialThread;
+    } else if (props.afterSaleId) {
+      thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
     } else {
       ElMessage.warning('缺少会话信息');
       emit('update:modelValue', false);
       return;
     }
     await loadMessages(true);
+    emit('read');
     startPoll();
   } catch (e) {
     ElMessage.error(e.message || '无法打开用户沟通会话');

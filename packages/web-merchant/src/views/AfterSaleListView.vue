@@ -1,8 +1,17 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { auditAfterSale, confirmAfterSaleReturn, getAfterSales } from '@/api/merchant';
+import { useRoute, useRouter } from 'vue-router';
+import {
+  auditAfterSale,
+  confirmAfterSaleReturn,
+  getAfterSales,
+  getMerchantAfterSaleChatThread,
+  fetchMerchantChatThreads,
+  notifyMerchantChatUnreadChanged,
+} from '@/api/merchant';
 import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
+import { getAfterSaleCommunicationMode } from '@/utils/afterSaleCommunication';
 
 const AFTER_SALE_STATUS_OPTIONS = [
   { label: '待商家处理', value: 'APPLIED', type: 'warning' },
@@ -12,6 +21,9 @@ const AFTER_SALE_STATUS_OPTIONS = [
   { label: '用户已寄回', value: 'RETURNING', type: 'info' },
   { label: '退款已完成', value: 'REFUNDED', type: 'success' },
 ];
+
+const route = useRoute();
+const router = useRouter();
 
 const AFTER_SALE_TYPE_LABELS = {
   REFUND_ONLY: '仅退款',
@@ -23,38 +35,53 @@ const list = ref([]);
 const total = ref(0);
 const keyword = ref('');
 const status = ref('');
+const page = ref(1);
+const pageSize = ref(10);
 const processingId = ref(null);
 const chatAfterSaleId = ref(null);
+const chatThread = ref(null);
 const chatVisible = ref(false);
+const chatUnreadByAfterSaleId = ref({});
 
 const statusMap = AFTER_SALE_STATUS_OPTIONS.reduce((map, item) => {
   map[item.value] = item;
   return map;
 }, {});
 
+function normalizeAfterSaleSearch(query) {
+  const value = String(query || '').replace(/\s+/g, '');
+  const afterSaleIdMatch = value.match(/^(?:售后单)?#?(\d+)$/);
+  if (afterSaleIdMatch) {
+    return { afterSaleId: Number(afterSaleIdMatch[1]), keyword: '' };
+  }
+  return { afterSaleId: null, keyword: value.toLowerCase() };
+}
+
 const filteredList = computed(() => {
-  const q = keyword.value.trim().toLowerCase();
+  const search = normalizeAfterSaleSearch(keyword.value);
   const rows = list.value.filter((row) => {
     const matchStatus = !status.value || row.status === status.value;
-    if (!q) return matchStatus;
+    if (!matchStatus) return false;
+    if (search.afterSaleId != null) return Number(row.afterSaleId) === search.afterSaleId;
+    if (!search.keyword) return true;
 
     const searchable = [
-      row.afterSaleId,
-      row.id,
       row.orderNo,
       row.orderId,
       row.subOrderId,
-      row.reason,
-      row.auditReason,
-      row.rejectReason,
       ...getItems(row).map((item) => item.title),
     ]
       .filter((value) => value != null && value !== '')
       .map((value) => String(value).toLowerCase());
 
-    return matchStatus && searchable.some((value) => value.includes(q));
+    return searchable.some((value) => value.includes(search.keyword));
   });
   return sortAfterSales(rows);
+});
+
+const paginatedList = computed(() => {
+  const start = (page.value - 1) * pageSize.value;
+  return filteredList.value.slice(start, start + pageSize.value);
 });
 
 function getSortId(row) {
@@ -94,7 +121,7 @@ function getStatusDescription(row) {
   if (row?.status === 'REFUNDED' && row?.type === 'RETURN_REFUND') return '退货验收通过，退款已完成';
   if (row?.status === 'REFUNDED') return '退款已完成';
   if (row?.status === 'ESCALATED') return '该售后由平台仲裁，商家不可继续处理';
-  if (row?.status === 'REJECTED') return '商家已拒绝该售后申请';
+  if (row?.status === 'REJECTED') return '商家已拒绝，等待用户是否继续沟通或申请平台介入。';
   return '-';
 }
 
@@ -124,13 +151,95 @@ function getReturnShipment(row) {
   return typeof shipment === 'object' ? shipment : null;
 }
 
-function getReadonlyActionText(row) {
-  if (row?.status === 'ESCALATED') return '待平台仲裁';
+function getTimelineSteps(row) {
+  const isReturnRefund = row?.type === 'RETURN_REFUND';
+  const status = row?.status;
+  const shipment = getReturnShipment(row);
+  const applied = { label: '提交申请', state: 'done', time: row?.appliedAt };
+  const audit = {
+    label: '商家审核',
+    state: status === 'APPLIED' ? 'current' : 'done',
+    time: row?.auditedAt,
+  };
+
+  if (status === 'REJECTED') {
+    return [
+      applied,
+      {
+        label: '商家审核：已拒绝',
+        state: 'rejected',
+        time: row?.auditedAt,
+        note: row?.auditReason || row?.rejectReason || '商家已拒绝该售后申请',
+      },
+    ];
+  }
+
+  if (status === 'ESCALATED') {
+    return [
+      applied,
+      {
+        label: '平台仲裁中',
+        state: 'current',
+        time: row?.escalatedAt,
+        note: '请等待平台处理，商家暂不可继续处理。',
+      },
+    ];
+  }
+
+  if (!isReturnRefund) {
+    const refundState = status === 'REFUNDED' ? 'done' : status === 'APPROVED' ? 'current' : 'pending';
+    return [
+      applied,
+      audit,
+      { label: '退款完成', state: refundState },
+    ];
+  }
+
+  const returningState = status === 'APPROVED' ? 'current' : ['RETURNING', 'REFUNDED'].includes(status) ? 'done' : 'pending';
+  const acceptanceState = status === 'RETURNING' ? 'current' : status === 'REFUNDED' ? 'done' : 'pending';
+  const refundedState = status === 'REFUNDED' ? 'done' : 'pending';
+  return [
+    applied,
+    audit,
+    { label: '用户寄回', state: returningState, time: shipment?.shippedAt },
+    { label: '商家验收', state: acceptanceState },
+    { label: '退款完成', state: refundedState },
+  ];
+}
+
+function getTimelineStateLabel(state) {
+  if (state === 'done') return '已完成';
+  if (state === 'current') return '当前';
+  if (state === 'rejected') return '已拒绝';
+  return '待处理';
+}
+
+function getOperationHint(row) {
+  if (row?.status === 'ESCALATED') return '等待平台处理';
   if (row?.status === 'APPROVED' && row?.type === 'RETURN_REFUND') return '等待用户寄回';
-  if (row?.status === 'APPROVED') return '商家已同意';
-  if (row?.status === 'REJECTED') return '已拒绝';
   if (row?.status === 'REFUNDED') return '已退款';
-  return '-';
+  return '';
+}
+
+function getCommunicationMode(row) {
+  return getAfterSaleCommunicationMode(row);
+}
+
+function getAfterSaleUnreadCount(row) {
+  return Number(chatUnreadByAfterSaleId.value[row?.afterSaleId]) || 0;
+}
+
+async function loadChatUnreadCounts() {
+  try {
+    const data = await fetchMerchantChatThreads({});
+    chatUnreadByAfterSaleId.value = (data?.list || []).reduce((counts, thread) => {
+      if (!thread.afterSaleId) return counts;
+      counts[thread.afterSaleId] = (counts[thread.afterSaleId] || 0) + (Number(thread.unreadCount) || 0);
+      return counts;
+    }, {});
+  } catch {
+    chatUnreadByAfterSaleId.value = {};
+  }
 }
 
 async function loadAfterSales() {
@@ -140,6 +249,7 @@ async function loadAfterSales() {
     const rows = Array.isArray(data) ? data : Array.isArray(data?.list) ? data.list : [];
     list.value = sortAfterSales(rows);
     total.value = Number(data?.total) || rows.length;
+    await loadChatUnreadCounts();
   } catch (e) {
     ElMessage.error(e.message || '加载售后单失败');
     list.value = [];
@@ -152,6 +262,17 @@ async function loadAfterSales() {
 function resetFilters() {
   keyword.value = '';
   status.value = '';
+  page.value = 1;
+  router.replace({ path: '/after-sales' });
+}
+
+function handlePageChange(value) {
+  page.value = value;
+}
+
+function handlePageSizeChange(value) {
+  pageSize.value = value;
+  page.value = 1;
 }
 
 function getReturnProgress(row) {
@@ -162,14 +283,28 @@ function getReturnProgress(row) {
   return '';
 }
 
-function getChatActionLabel(row) {
-  return ['REJECTED', 'REFUNDED', 'ESCALATED'].includes(row?.status) ? '查看沟通' : '回复用户';
+async function openChat(row) {
+  if (!row?.afterSaleId) return;
+  const communicationMode = getCommunicationMode(row);
+  try {
+    const thread = await getMerchantAfterSaleChatThread(Number(row.afterSaleId));
+    chatAfterSaleId.value = null;
+    chatThread.value = thread;
+    chatVisible.value = true;
+  } catch (e) {
+    if (communicationMode.openMethod === 'GET_HISTORY') {
+      ElMessage.info(e.message || '暂无可查看的历史沟通记录');
+      return;
+    }
+    chatThread.value = null;
+    chatAfterSaleId.value = Number(row.afterSaleId);
+    chatVisible.value = true;
+  }
 }
 
-function openChat(row) {
-  if (!row?.afterSaleId) return;
-  chatAfterSaleId.value = Number(row.afterSaleId);
-  chatVisible.value = true;
+async function handleChatRead() {
+  notifyMerchantChatUnreadChanged();
+  await loadChatUnreadCounts();
 }
 
 async function approve(row) {
@@ -266,7 +401,22 @@ async function confirmReturn(row) {
   }
 }
 
-onMounted(loadAfterSales);
+watch([keyword, status], () => {
+  page.value = 1;
+});
+
+watch(
+  () => [route.query.afterSaleId, route.query.orderNo],
+  ([afterSaleId, orderNo]) => {
+    keyword.value = afterSaleId ? `#${afterSaleId}` : orderNo ? String(orderNo) : '';
+  },
+);
+
+onMounted(() => {
+  status.value = route.query.status || '';
+  keyword.value = route.query.afterSaleId ? `#${route.query.afterSaleId}` : route.query.orderNo ? String(route.query.orderNo) : '';
+  loadAfterSales();
+});
 </script>
 
 <template>
@@ -285,7 +435,7 @@ onMounted(loadAfterSales);
         v-model="keyword"
         clearable
         class="keyword-input"
-        placeholder="搜索售后单号、订单号、子订单号、商品名或申请原因"
+        placeholder="搜索售后单号、订单号、子订单号或商品名"
       />
       <el-select v-model="status" clearable placeholder="全部状态" class="status-filter">
         <el-option label="全部" value="" />
@@ -299,9 +449,9 @@ onMounted(loadAfterSales);
       <el-button @click="resetFilters">重置</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="filteredList" stripe>
+    <el-table v-loading="loading" :data="paginatedList" stripe>
       <template #empty>
-        <el-empty description="暂无符合条件的售后单" />
+        <el-empty description="未找到匹配的售后单，请调整搜索或筛选条件" />
       </template>
       <el-table-column prop="afterSaleId" label="售后单号" width="100" />
       <el-table-column prop="orderNo" label="订单号" min-width="160" show-overflow-tooltip>
@@ -335,6 +485,41 @@ onMounted(loadAfterSales);
           <div class="status-description">{{ getStatusDescription(row) }}</div>
         </template>
       </el-table-column>
+      <el-table-column label="沟通状态" min-width="180">
+        <template #default="{ row }">
+          <el-tag :type="getCommunicationMode(row).isReadOnly ? 'info' : 'primary'" size="small">
+            {{ getCommunicationMode(row).displayText }}
+          </el-tag>
+          <el-tag v-if="getAfterSaleUnreadCount(row)" type="danger" size="small" class="unread-tag">
+            未读 {{ getAfterSaleUnreadCount(row) }} 条
+          </el-tag>
+          <div v-if="getCommunicationMode(row).needsMerchantAction" class="communication-tip">
+            {{ getCommunicationMode(row).merchantActionText }}
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="售后进度" min-width="250">
+        <template #default="{ row }">
+          <div class="after-sale-timeline">
+            <div
+              v-for="(step, index) in getTimelineSteps(row)"
+              :key="`${row.afterSaleId}-${step.label}`"
+              class="timeline-step"
+              :class="`is-${step.state}`"
+            >
+              <span class="timeline-index">{{ index + 1 }}</span>
+              <div class="timeline-content">
+                <div class="timeline-title-row">
+                  <span>{{ step.label }}</span>
+                  <span class="timeline-state">{{ getTimelineStateLabel(step.state) }}</span>
+                </div>
+                <div v-if="step.time" class="timeline-time">{{ formatTime(step.time) }}</div>
+                <div v-if="step.note" class="timeline-note">{{ step.note }}</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="申请时间" width="170">
         <template #default="{ row }">{{ formatTime(row.appliedAt) }}</template>
       </el-table-column>
@@ -355,47 +540,65 @@ onMounted(loadAfterSales);
       <el-table-column label="处理原因" min-width="160" show-overflow-tooltip>
         <template #default="{ row }">{{ row.auditReason || row.rejectReason || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="250" fixed="right">
         <template #default="{ row }">
-          <template v-if="row.status === 'APPLIED'">
-            <el-button
-              link
-              type="success"
-              :disabled="!!processingId && processingId !== row.afterSaleId"
-              :loading="processingId === row.afterSaleId"
-              @click="approve(row)"
-            >
-              同意
-            </el-button>
-            <el-button
-              link
-              type="danger"
-              :disabled="!!processingId && processingId !== row.afterSaleId"
-              :loading="processingId === row.afterSaleId"
-              @click="reject(row)"
-            >
-              拒绝
-            </el-button>
-          </template>
-          <template v-else-if="row.status === 'RETURNING'">
-            <el-button
-              link
-              type="primary"
-              :disabled="!!processingId && processingId !== row.afterSaleId"
-              :loading="processingId === row.afterSaleId"
-              @click="confirmReturn(row)"
-            >
-              验收通过并退款
-            </el-button>
-          </template>
-          <span v-else class="muted">{{ getReadonlyActionText(row) }}</span>
-          <el-button link type="primary" @click="openChat(row)">{{ getChatActionLabel(row) }}</el-button>
+          <div class="after-sale-actions">
+            <template v-if="row.status === 'APPLIED'">
+              <el-button
+                link
+                type="success"
+                :disabled="!!processingId && processingId !== row.afterSaleId"
+                :loading="processingId === row.afterSaleId"
+                @click="approve(row)"
+              >
+                同意
+              </el-button>
+              <el-button
+                link
+                type="danger"
+                :disabled="!!processingId && processingId !== row.afterSaleId"
+                :loading="processingId === row.afterSaleId"
+                @click="reject(row)"
+              >
+                拒绝
+              </el-button>
+            </template>
+            <template v-else-if="row.status === 'RETURNING'">
+              <el-button
+                link
+                type="primary"
+                :disabled="!!processingId && processingId !== row.afterSaleId"
+                :loading="processingId === row.afterSaleId"
+                @click="confirmReturn(row)"
+              >
+                验收通过并退款
+              </el-button>
+            </template>
+            <span v-if="getOperationHint(row)" class="muted">{{ getOperationHint(row) }}</span>
+            <el-button link type="primary" @click="openChat(row)">{{ getCommunicationMode(row).actionLabel }}</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
 
-    <div class="summary">共 {{ filteredList.length }} / {{ total }} 条售后单</div>
-    <AfterSaleChatDrawer v-model="chatVisible" :after-sale-id="chatAfterSaleId" />
+    <div class="pagination-bar">
+      <div class="summary">筛选 {{ filteredList.length }} 条，共 {{ total }} 条售后单</div>
+      <el-pagination
+        :current-page="page"
+        :page-size="pageSize"
+        :page-sizes="[10, 20, 50]"
+        :total="filteredList.length"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handlePageSizeChange"
+        @current-change="handlePageChange"
+      />
+    </div>
+    <AfterSaleChatDrawer
+      v-model="chatVisible"
+      :after-sale-id="chatAfterSaleId"
+      :initial-thread="chatThread"
+      @read="handleChatRead"
+    />
   </el-card>
 </template>
 
@@ -435,13 +638,57 @@ onMounted(loadAfterSales);
 .item-meta { flex: none; color: #666; }
 .reason-text { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .status-description { margin-top: 6px; color: #666; font-size: 12px; line-height: 18px; }
+.unread-tag { margin-left: 6px; }
+.communication-tip { margin-top: 6px; color: #e6a23c; font-size: 12px; line-height: 18px; }
+.after-sale-timeline { display: flex; flex-direction: column; gap: 8px; }
+.timeline-step { position: relative; display: flex; gap: 8px; min-height: 32px; color: #999; font-size: 12px; }
+.timeline-step:not(:last-child)::after {
+  position: absolute;
+  top: 22px;
+  left: 9px;
+  width: 1px;
+  height: calc(100% - 12px);
+  background: #dcdfe6;
+  content: '';
+}
+.timeline-index {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #dcdfe6;
+  color: #fff;
+  font-size: 11px;
+}
+.timeline-content { min-width: 0; flex: 1; }
+.timeline-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; line-height: 18px; }
+.timeline-state { flex: none; font-size: 11px; }
+.timeline-time, .timeline-note { margin-top: 2px; color: #999; line-height: 18px; }
+.timeline-note { color: #606266; }
+.timeline-step.is-done { color: #67c23a; }
+.timeline-step.is-current { color: #409eff; font-weight: 600; }
+.timeline-step.is-rejected { color: #f56c6c; }
+.timeline-step.is-done .timeline-index { background: #67c23a; }
+.timeline-step.is-current .timeline-index { background: #409eff; }
+.timeline-step.is-rejected .timeline-index { background: #f56c6c; }
 .return-progress { margin-bottom: 5px; color: #409eff; font-size: 12px; font-weight: 600; }
 .shipment-info { color: #333; font-size: 13px; line-height: 21px; }
 .muted { color: #999; }
-.summary {
+.after-sale-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pagination-bar {
   margin-top: 16px;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.summary {
   color: #666;
 }
 </style>

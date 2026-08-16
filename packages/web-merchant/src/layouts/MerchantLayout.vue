@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { fetchMerchantChatUnreadCount } from '@/api/merchant';
 
 const route = useRoute();
 const router = useRouter();
@@ -10,11 +11,33 @@ const auth = useAuthStore();
 const activeMenu = computed(() => route.path);
 const pageTitle = computed(() => route.meta.title || '商家后台');
 const displayName = computed(() => auth.shopName || auth.username || '商家');
+const unreadCount = ref(0);
+let unreadTimer = null;
+
+async function refreshUnreadCount() {
+  try {
+    const data = await fetchMerchantChatUnreadCount();
+    unreadCount.value = Number(data?.unreadCount) || 0;
+  } catch {
+    unreadCount.value = 0;
+  }
+}
 
 function logout() {
   auth.logout();
   router.push({ name: 'login' });
 }
+
+onMounted(() => {
+  refreshUnreadCount();
+  window.addEventListener('merchant-chat-unread-changed', refreshUnreadCount);
+  unreadTimer = window.setInterval(refreshUnreadCount, 15000);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('merchant-chat-unread-changed', refreshUnreadCount);
+  if (unreadTimer) window.clearInterval(unreadTimer);
+});
 </script>
 
 <template>
@@ -40,7 +63,9 @@ function logout() {
         </el-menu-item>
         <el-menu-item index="/chats">
           <el-icon><ChatDotRound /></el-icon>
-          <span>用户沟通</span>
+          <el-badge type="danger" :value="unreadCount > 99 ? '99+' : unreadCount" :hidden="!unreadCount" class="chat-badge">
+            <span>用户沟通</span>
+          </el-badge>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -85,4 +110,5 @@ function logout() {
 .header-right { display: flex; align-items: center; gap: 12px; }
 .user { color: #666; }
 .main { background: var(--content-bg); padding: 16px; }
+.chat-badge :deep(.el-badge__content) { top: 8px; right: -20px; font-weight: 700; box-shadow: 0 0 0 2px #001529; }
 </style>
