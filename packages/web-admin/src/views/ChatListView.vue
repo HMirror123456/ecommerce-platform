@@ -17,12 +17,26 @@ const draft = ref('');
 const sending = ref(false);
 const rejectVisible = ref(false);
 const rejectReason = ref('');
+const orderStatusVisible = ref(false);
+const orderStatusForm = ref({ status: 'SHIPPED', reason: '' });
+const orderStatusSubmitting = ref(false);
 let pollTimer = null;
+
+const ORDER_STATUS_OPTIONS = [
+  { label: '已发货 (SHIPPED)', value: 'SHIPPED' },
+  { label: '已完成 (COMPLETED)', value: 'COMPLETED' },
+  { label: '已退款 (REFUNDED)', value: 'REFUNDED' },
+];
 
 const activeThread = computed(() => threads.value.find((t) => t.id === activeId.value) || null);
 const canArbitrate = computed(() => {
   const t = activeThread.value;
   return t && t.afterSaleStatus === 'ESCALATED';
+});
+const canSetOrderStatus = computed(() => {
+  const t = activeThread.value;
+  // 会话关联订单即可显示入口；非 REFUNDING 时由接口返回明确错误
+  return !!(t && t.orderId);
 });
 
 function formatTime(iso) {
@@ -168,6 +182,37 @@ async function onHintReturn() {
   }
 }
 
+function openOrderStatus() {
+  orderStatusForm.value = { status: 'SHIPPED', reason: '' };
+  orderStatusVisible.value = true;
+}
+
+async function onSetOrderStatus() {
+  if (!orderStatusForm.value.status) {
+    ElMessage.warning('请选择目标订单状态');
+    return;
+  }
+  if (!orderStatusForm.value.reason.trim()) {
+    ElMessage.warning('请填写更改原因');
+    return;
+  }
+  orderStatusSubmitting.value = true;
+  try {
+    const data = await runChatAction(activeId.value, 'SET_ORDER_STATUS', {
+      status: orderStatusForm.value.status,
+      reason: orderStatusForm.value.reason.trim(),
+    });
+    if (data.message) messages.value.push(data.message);
+    orderStatusVisible.value = false;
+    ElMessage.success('订单状态已更新');
+    await loadThreads();
+  } catch (e) {
+    ElMessage.error(e.message || '操作失败');
+  } finally {
+    orderStatusSubmitting.value = false;
+  }
+}
+
 function startPoll() {
   stopPoll();
   pollTimer = setInterval(() => {
@@ -207,7 +252,9 @@ onUnmounted(stopPoll);
         @click="selectThread(t)"
       >
         <div class="t-no">{{ t.orderNo }}</div>
-        <div class="t-meta">售后 #{{ t.afterSaleId }} · {{ t.afterSaleStatus || '-' }}</div>
+        <div class="t-meta">
+          售后 #{{ t.afterSaleId }} · {{ t.afterSaleStatus || '-' }} · 订单 {{ t.orderStatus || '-' }}
+        </div>
       </div>
     </aside>
 
@@ -216,15 +263,25 @@ onUnmounted(stopPoll);
         <div class="msg-header">
           <div>
             <strong>{{ activeThread.orderNo }}</strong>
-            <span class="muted"> · 售后 #{{ activeThread.afterSaleId }} · {{ activeThread.afterSaleStatus }}</span>
+            <span class="muted">
+              · 售后 #{{ activeThread.afterSaleId }} · {{ activeThread.afterSaleStatus }}
+              · 订单 {{ activeThread.orderStatus || '-' }}
+            </span>
           </div>
-          <div class="quick" v-if="canArbitrate">
-            <el-button size="small" type="success" @click="onApprove">同意售后</el-button>
-            <el-button size="small" type="danger" @click="openReject">拒绝售后</el-button>
+          <div class="quick">
+            <template v-if="canArbitrate">
+              <el-button size="small" type="success" @click="onApprove">同意售后</el-button>
+              <el-button size="small" type="danger" @click="openReject">拒绝售后</el-button>
+            </template>
             <el-button size="small" @click="onHintReturn">引导寄回</el-button>
-          </div>
-          <div class="quick" v-else>
-            <el-button size="small" @click="onHintReturn">引导寄回</el-button>
+            <el-button
+              v-if="canSetOrderStatus"
+              size="small"
+              type="warning"
+              @click="openOrderStatus"
+            >
+              更改订单状态
+            </el-button>
           </div>
           <el-button size="small" type="info" plain @click="onCloseThread">结束会话</el-button>
         </div>
@@ -271,6 +328,35 @@ onUnmounted(stopPoll);
       <template #footer>
         <el-button @click="rejectVisible = false">取消</el-button>
         <el-button type="danger" @click="onReject">确认拒绝</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="orderStatusVisible" title="更改订单状态" width="440px">
+      <el-form label-position="top">
+        <el-form-item label="目标状态" required>
+          <el-select v-model="orderStatusForm.status" style="width: 100%">
+            <el-option
+              v-for="opt in ORDER_STATUS_OPTIONS"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="原因" required>
+          <el-input
+            v-model="orderStatusForm.reason"
+            type="textarea"
+            :rows="3"
+            placeholder="请说明更改原因（必填）"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="orderStatusVisible = false">取消</el-button>
+        <el-button type="primary" :loading="orderStatusSubmitting" @click="onSetOrderStatus">
+          确认更改
+        </el-button>
       </template>
     </el-dialog>
   </div>

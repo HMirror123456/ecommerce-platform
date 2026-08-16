@@ -28,6 +28,7 @@ function chatActor(req) {
   return null;
 }
 
+/** 用户开 USER_CS 会话 */
 router.post('/after-sales/:afterSaleId/chat/thread', requireUser, async (req, res, next) => {
   try {
     const result = await ensureUserCsThread(req.user.id, Number(req.params.afterSaleId));
@@ -53,6 +54,7 @@ router.get('/after-sales/:afterSaleId/chat/thread', requireUserMerchantOrCs, asy
   }
 });
 
+/** 用户/商家开售后 USER_MERCHANT 会话 */
 router.post(
   '/after-sales/:afterSaleId/merchant-chat/thread',
   requireUserMerchantOrCs,
@@ -102,6 +104,14 @@ router.get(
 router.post('/orders/:orderId/merchant-chat/thread', requireUser, async (req, res, next) => {
   try {
     const result = await ensureOrderMerchantThread(req.user.id, Number(req.params.orderId), req.body || {});
+/** 用户开订单级商家沟通 */
+router.post('/orders/:orderId/merchant-chat/thread', requireUser, async (req, res, next) => {
+  try {
+    const result = await ensureOrderMerchantThread(
+      req.user.id,
+      Number(req.params.orderId),
+      req.body || {},
+    );
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
     if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
     if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
@@ -120,6 +130,27 @@ router.post('/merchant/after-sales/:afterSaleId/chat/thread', requireMerchant, a
       { kind: 'merchant', merchant: req.merchant },
       Number(req.params.afterSaleId),
     );
+/** 商家侧开售后沟通（兼容入口） */
+router.post('/merchant/after-sales/:afterSaleId/chat/thread', requireMerchant, async (req, res, next) => {
+  try {
+    const result = await ensureUserMerchantThreadForMerchant(
+      req.merchant.id,
+      Number(req.params.afterSaleId),
+    );
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.status(result.created ? 201 : 200).json(result.thread);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** 用户侧兼容入口 */
+router.post('/users/after-sales/:afterSaleId/merchant-chat/thread', requireUser, async (req, res, next) => {
+  try {
+    const result = await ensureUserMerchantThreadForUser(req.user.id, Number(req.params.afterSaleId));
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
     if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
     if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
@@ -217,10 +248,14 @@ router.post(
       });
     }
     return requireAdmin(['CS_AGENT'])(req, res, async (err) => {
+router.post('/chat/threads/:threadId/actions/:actionKey', async (req, res, next) => {
+  const key = String(req.params.actionKey || '').toUpperCase();
+  if (key.startsWith('MERCHANT_')) {
+    return requireMerchant(req, res, async (err) => {
       if (err) return next(err);
       try {
-        const result = await runChatAction(
-          req.admin,
+        const result = await runMerchantChatAction(
+          req.merchant,
           Number(req.params.threadId),
           key,
           req.body || {},
@@ -228,13 +263,38 @@ router.post(
         if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
         if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
         if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+        if (result.error === 'REASON_REQUIRED' || result.error === 'INVALID') {
+          return res.status(400).json({ message: result.message });
+        }
         if (result.error) return res.status(400).json({ message: result.message });
         res.json({ message: result.message, afterSale: result.afterSale || null });
       } catch (e) {
         next(e);
       }
     });
-  },
-);
+  }
+  return requireAdmin(['CS_AGENT'])(req, res, async (err) => {
+    if (err) return next(err);
+    try {
+      const result = await runChatAction(
+        req.admin,
+        Number(req.params.threadId),
+        key,
+        req.body || {},
+      );
+      if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+      if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+      if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+      if (result.error) return res.status(400).json({ message: result.message });
+      res.json({
+        message: result.message,
+        afterSale: result.afterSale || null,
+        order: result.order || null,
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+});
 
 export default router;

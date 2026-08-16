@@ -37,7 +37,7 @@
 | 商品上架审核 | — | 提交 | ✓ | — | ✓ |
 | 商家入驻审核 | — | 提交 | ✓ | — | ✓ |
 | 全平台订单查询 | 自己的 | 本店 | ✓ | ✓ | ✓ |
-| 强制关闭异常单 | — | — | — | ✓ | ✓ |
+| 强制关闭异常单 | — | — | — | ✓（售后会话 `SET_ORDER_STATUS`） | ✓ |
 | 管理员账号管理 | — | — | — | — | ✓ |
 
 **鉴权规则：**
@@ -115,7 +115,7 @@ sequenceDiagram
 | `/dashboard` | 工作台 | P1 | 统计卡片、快捷入口、待办预览（按角色） |
 | `/orders` | 订单查询 | P1 | 筛选+详情，只读；OPERATOR / CS_AGENT / SUPER_ADMIN |
 | `/after-sales` | 售后仲裁 | P1 | Tab：待仲裁 / 已完成；CS_AGENT / SUPER_ADMIN |
-| `/chat` | 售后会话 | P1 | 用户↔平台客服会话列表+聊天窗；见 [`CHAT.md`](CHAT.md) |
+| `/chat` | 售后会话 | P1 | 用户↔平台客服会话列表+聊天窗；含更改订单状态；见 [`CHAT.md`](CHAT.md) |
 | `/audit/merchants` | 商家审核 | P1 | 入驻申请列表 |
 | `/categories` | 类目管理 | P2 | 树形编辑或只读 |
 
@@ -141,7 +141,7 @@ sequenceDiagram
 | GET | `/chat/threads` | CS_AGENT, SUPER_ADMIN, 用户 | 售后会话列表（USER_CS） |
 | GET | `/chat/threads/{id}/messages` | 会话参与方 | 消息列表（可 afterId 增量） |
 | POST | `/chat/threads/{id}/messages` | 会话参与方 | 发文字/卡片 |
-| POST | `/chat/threads/{id}/actions/{key}` | CS_AGENT, SUPER_ADMIN | 快捷仲裁/引导寄回 |
+| POST | `/chat/threads/{id}/actions/{key}` | CS_AGENT, SUPER_ADMIN | 快捷仲裁/引导寄回/`SET_ORDER_STATUS` 改订单状态 |
 | POST | `/after-sales/{id}/chat/thread` | 用户 | 开聊/取已有 USER_CS 会话 |
 | GET | `/admin/merchants/pending` | OPERATOR, SUPER_ADMIN | 待审核商家（P1） |
 | POST | `/admin/merchants/{id}/audit` | OPERATOR, SUPER_ADMIN | 商家审核（P1） |

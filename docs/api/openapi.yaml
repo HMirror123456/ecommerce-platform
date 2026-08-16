@@ -1971,7 +1971,8 @@ paths:
       tags: [chat]
       summary: 客服或商家快捷动作
       description: |
-        客服（USER_CS）：CS_APPROVE / CS_REJECT → arbitrate；HINT_RETURN → SYSTEM 文案。
+        客服（USER_CS）：CS_APPROVE / CS_REJECT → arbitrate；HINT_RETURN → SYSTEM 文案；
+        SET_ORDER_STATUS → 将关联主单从 REFUNDING 改为 SHIPPED / COMPLETED / REFUNDED（body 须 status + reason；非 REFUNDING 返回 409）。
         商家（USER_MERCHANT）：MERCHANT_APPROVE / MERCHANT_REJECT → merchant after-sale audit，并写 SYSTEM 消息。
       security:
         - bearerAuth: []
@@ -1995,6 +1996,10 @@ paths:
               properties:
                 reason:
                   type: string
+                status:
+                  type: string
+                  description: SET_ORDER_STATUS 时必填
+                  enum: [SHIPPED, COMPLETED, REFUNDED]
       responses:
         '200':
           description: OK
@@ -2008,6 +2013,11 @@ paths:
                   afterSale:
                     type: object
                     description: 动作影响售后时返回
+                  order:
+                    type: object
+                    description: SET_ORDER_STATUS 时返回更新后订单摘要
+        '409':
+          description: 当前订单状态不允许更改
 
 components:
   securitySchemes:
@@ -2048,6 +2058,14 @@ components:
           enum: [OPEN, CLOSED]
         afterSaleStatus:
           type: string
+        orderStatus:
+          type: string
+          nullable: true
+          description: 关联主单当前状态
+        subOrderStatus:
+          type: string
+          nullable: true
+          description: 关联子单状态（有 subOrderId 时）
         createdAt:
           type: string
           format: date-time
@@ -2102,6 +2120,7 @@ components:
         - CS_APPROVE
         - CS_REJECT
         - HINT_RETURN
+        - SET_ORDER_STATUS
         - MERCHANT_APPROVE
         - MERCHANT_REJECT
 

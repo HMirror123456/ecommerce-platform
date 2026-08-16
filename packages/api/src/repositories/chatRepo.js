@@ -216,7 +216,7 @@ export async function listOpenOrderMerchantThreads(orderId, { merchantId } = {})
 
 export async function listThreadsForUser(userId, { status, type } = {}) {
   const params = [userId];
-  let sql = `SELECT * FROM chat_threads WHERE user_id = ?`;
+  let sql = 'SELECT * FROM chat_threads WHERE user_id = ?';
   if (type) {
     sql += ' AND type = ?';
     params.push(type);

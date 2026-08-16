@@ -853,6 +853,9 @@ onUnmounted(() => {
             >
               联系平台客服
             </el-button>
+            <p v-if="canSubmitReturn(as)" class="line tip">
+              退货指引：点击下方「填写寄回物流」，提交物流公司与运单号；商家验收后完成退款。
+            </p>
             <el-button
               v-if="canSubmitReturn(as)"
               type="primary"
@@ -1215,6 +1218,13 @@ onUnmounted(() => {
 .muted {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.line.tip {
+  margin: 0 0 8px;
+  color: #8a6116;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .hint-text {

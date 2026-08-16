@@ -244,13 +244,21 @@ async function onSendCard() {
 }
 
 function goOrderFromCard(payload) {
-  const orderId = payload?.orderId;
+  const orderId = payload?.orderId || thread.value?.orderId || props.orderId;
   if (!orderId) {
     ElMessage.warning('卡片缺少订单信息');
     return;
   }
   emit('update:modelValue', false);
   router.push({ name: 'order-detail', params: { orderId } });
+}
+
+function isHintReturn(msg) {
+  return msg?.payload?.actionKey === 'HINT_RETURN';
+}
+
+function goFillReturn(msg) {
+  goOrderFromCard(msg?.payload || {});
 }
 
 function startPoll() {
@@ -367,8 +375,17 @@ onUnmounted(stopPoll);
               }"
             >
               <template v-if="isSystem(m)">
-                <div class="system-chip">
+                <div class="system-chip" :class="{ guide: isHintReturn(m) }">
                   <span>{{ m.content }}</span>
+                  <el-button
+                    v-if="isHintReturn(m)"
+                    type="primary"
+                    link
+                    size="small"
+                    @click="goFillReturn(m)"
+                  >
+                    去订单详情填写寄回物流
+                  </el-button>
                   <time>{{ formatTime(m.createdAt) }}</time>
                 </div>
               </template>
@@ -830,9 +847,24 @@ onUnmounted(stopPoll);
   text-align: center;
 }
 
+.system-chip.guide {
+  align-items: stretch;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fff7e6;
+  color: #8a6116;
+  text-align: left;
+  line-height: 1.5;
+}
+
 .system-chip time {
   font-size: 10px;
   opacity: 0.8;
+}
+
+.system-chip.guide time {
+  align-self: flex-end;
 }
 
 .text {
