@@ -43,8 +43,9 @@
 | 一人一单 | 同一 `afterSaleId` 仅一条 OPEN 的 `USER_CS` |
 | 鉴权 | 用户仅本人会话；`CS_AGENT`/`SUPER_ADMIN` 可进全部 `USER_CS` |
 | 传输 | HTTP 发消息 + 客户端 3–5s 轮询 `messages?afterId=`；无 WebSocket |
-| 快捷动作 | 仅客服：`CS_APPROVE` / `CS_REJECT` → 已有 arbitrate；`HINT_RETURN` → 仅 SYSTEM 文案 |
+| 快捷动作 | 仅客服：`CS_APPROVE` / `CS_REJECT` → 已有 arbitrate；`HINT_RETURN` → SYSTEM 文案，指引用户到订单详情「填写寄回物流」；`SET_ORDER_STATUS` → 更改关联订单状态（见下） |
 | 卡片 | `msgType=CARD`，payload 含 orderNo、金额摘要、售后状态等 |
+| 更改订单状态 | 售后会话聊天头「更改订单状态」入口常显（有关联订单即可）。仅主单为 `REFUNDING` 时可成功提交；目标仅 `SHIPPED` / `COMPLETED` / `REFUNDED`；`reason` 必填。目标为 `REFUNDED` 时关联售后标 `REFUNDED` 并回补库存；目标为 `SHIPPED`/`COMPLETED` 时若售后仍进行中则标 `REJECTED`。写 SYSTEM 消息，线程列表展示 `orderStatus` |
 
 ### 1.3 API 摘要
 
@@ -55,7 +56,7 @@
 | 端 | 入口 |
 |----|------|
 | web-user | 订单详情售后区「联系平台客服」；个人中心「客服会话」 |
-| web-admin | 菜单「售后会话」；快捷仲裁按钮 |
+| web-admin | 菜单「售后会话」；快捷仲裁；更改订单状态 |
 
 ---
 
