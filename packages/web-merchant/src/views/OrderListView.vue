@@ -296,10 +296,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <el-card shadow="never">
+  <el-card shadow="never" class="order-page">
     <template #header>
       <div class="card-header">
-        <span>商家订单列表</span>
+        <div>
+          <div class="title">订单管理</div>
+          <div class="description">查看订单履约、物流信息与售后进度</div>
+        </div>
       </div>
     </template>
 
@@ -326,7 +329,11 @@ onMounted(() => {
       <template #empty>
         <el-empty description="暂无符合条件的订单" />
       </template>
-      <el-table-column prop="orderNo" label="订单编号" min-width="180" show-overflow-tooltip />
+      <el-table-column label="订单编号" min-width="190" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="order-no" :title="row.orderNo || '-'">{{ row.orderNo || '-' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="subOrderId" label="子订单" width="100" />
       <el-table-column label="状态" min-width="180">
         <template #default="{ row }">
@@ -441,11 +448,13 @@ onMounted(() => {
   justify-content: space-between;
   gap: 16px;
 }
+.title { color: #1f2937; font-size: 17px; font-weight: 700; line-height: 26px; }
+.description { margin-top: 4px; color: #94a3b8; font-size: 13px; }
 .filter-bar {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px 12px;
   flex-wrap: wrap;
 }
 .keyword-input {
@@ -454,17 +463,18 @@ onMounted(() => {
 .status-filter {
   width: 160px;
 }
-.items { display: flex; flex-direction: column; gap: 6px; }
-.item-line { display: flex; justify-content: space-between; gap: 12px; }
+.items { display: flex; flex-direction: column; gap: 7px; }
+.item-line { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
 .item-title { color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-meta { flex: none; color: #666; }
-.address { line-height: 1.5; }
+.order-no { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.address { line-height: 1.65; min-width: 0; }
 .receipt-description { margin-top: 5px; color: #67c23a; font-size: 12px; line-height: 18px; }
 .muted { color: #999; }
-.action-list { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.ship-info { margin-bottom: 16px; }
+.action-list { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-height: 32px; }
+.ship-info { margin-bottom: 18px; }
 .pagination-bar {
-  margin-top: 16px;
+  margin-top: 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -472,6 +482,9 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 .summary {
-  color: #666;
+  color: #64748b;
+}
+@media (max-width: 900px) {
+  .keyword-input { width: min(100%, 360px); }
 }
 </style>

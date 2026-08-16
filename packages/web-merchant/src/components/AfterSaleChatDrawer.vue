@@ -32,7 +32,13 @@ const TYPE_LABELS = {
 
 const isOrderThread = computed(() => Boolean(thread.value && !thread.value.afterSaleId));
 
-const drawerTitle = computed(() => (isOrderThread.value ? '订单沟通' : '回复用户'));
+const drawerTitle = computed(() => {
+  const currentThread = thread.value || props.initialThread;
+  if (!currentThread) return '回复用户';
+  if (!currentThread.afterSaleId) return currentThread.status === 'CLOSED' ? '查看会话' : '订单沟通';
+  const mode = getAfterSaleCommunicationMode(currentThread.afterSaleStatus);
+  return currentThread.status !== 'OPEN' || mode.isReadOnly ? '查看沟通' : '回复用户';
+});
 
 function formatTime(iso) {
   if (!iso) return '';
@@ -184,6 +190,7 @@ onUnmounted(stopPoll);
     :model-value="modelValue"
     :title="drawerTitle"
     size="400px"
+    class="merchant-chat-drawer"
     @close="onClose"
     @update:model-value="emit('update:modelValue', $event)"
   >
@@ -248,26 +255,37 @@ onUnmounted(stopPoll);
 <style scoped>
 .drawer-body { display: flex; flex-direction: column; height: calc(100vh - 120px); }
 .thread-meta {
-  margin-bottom: 8px;
-  color: #999;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  color: #64748b;
   font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fafbfd;
 }
-.msg-list { flex: 1; overflow: auto; padding: 12px; background: #f5f5f5; border-radius: 8px; }
-.bubble-row { display: flex; margin-bottom: 10px; }
+.msg-list { flex: 1; overflow: auto; padding: 14px; background: #f7f9fc; border: 1px solid #edf0f5; border-radius: 10px; }
+.bubble-row { display: flex; margin-bottom: 12px; }
 .bubble-row.mine { justify-content: flex-end; }
 .bubble-row.system { justify-content: center; }
-.bubble { max-width: 85%; padding: 8px 10px; background: #fff; border-radius: 8px; }
-.bubble-row.mine .bubble { background: #e8f3ff; }
-.bubble-row.system .bubble { background: #fff7e6; }
-.who { margin-bottom: 4px; color: #999; font-size: 11px; }
-.text { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
-.card { padding: 8px; border: 1px solid #eee; border-radius: 6px; font-size: 12px; line-height: 1.7; }
-.card-title { margin-bottom: 4px; font-weight: 600; }
-.muted { color: #999; }
-.read-only-hint { color: #909399; font-size: 12px; }
-.composer { display: grid; gap: 8px; margin-top: 12px; }
+.bubble { max-width: 85%; padding: 9px 11px; background: #fff; border: 1px solid #edf0f5; border-radius: 10px; box-shadow: 0 1px 2px rgba(15, 23, 42, .03); }
+.bubble-row.mine .bubble { background: #eaf3ff; border-color: #cfe4ff; }
+.bubble-row.system .bubble { max-width: 92%; background: #fff8eb; border-color: #f8dfaa; }
+.who { margin-bottom: 5px; color: #94a3b8; font-size: 11px; }
+.text { white-space: pre-wrap; color: #334155; font-size: 13px; line-height: 1.6; }
+.card { padding: 9px; border: 1px solid #e8edf5; border-radius: 7px; background: rgba(255,255,255,.72); font-size: 12px; line-height: 1.75; }
+.card-title { margin-bottom: 5px; color: #1f2937; font-weight: 700; }
+.muted { color: #94a3b8; }
+.read-only-hint { padding: 8px 10px; color: #64748b; font-size: 12px; line-height: 18px; border-radius: 6px; background: #f4f6f8; }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 14px; align-items: end; }
+.composer .read-only-hint { grid-column: 1 / -1; }
+.composer :deep(.el-button) { min-width: 72px; height: 32px; }
+.merchant-chat-drawer :deep(.el-drawer__header) { margin-bottom: 16px; color: #1f2937; font-weight: 700; }
+@media (max-width: 520px) {
+  .composer { grid-template-columns: 1fr; }
+  .composer :deep(.el-button) { width: 100%; }
+}
 </style>

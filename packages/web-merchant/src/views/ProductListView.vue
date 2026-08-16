@@ -461,7 +461,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <el-card shadow="never">
+  <el-card shadow="never" class="product-page">
     <template #header>
       <div class="card-header">
         <div>
@@ -634,32 +634,34 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
-          <span v-if="row.status === 'PENDING_AUDIT'" class="muted">待平台审核</span>
-          <template v-else>
-            <el-button v-if="canEdit(row.status)" link type="primary" @click="editProduct(row)">编辑</el-button>
-            <el-button
-              v-if="getSkus(row).length"
-              link
-              type="primary"
-              :disabled="stockSubmitting"
-              @click="openProductStockDialog(row)"
-            >调整库存</el-button>
-            <el-button
-              v-if="canSubmitAudit(row.status)"
-              link
-              type="primary"
-              :loading="submittingSpuId === row.spuId"
-              @click="confirmSubmitAudit(row)"
-            >{{ getSubmitAuditLabel(row.status) }}</el-button>
-            <el-button
-              v-if="canOffShelf(row.status)"
-              link
-              type="warning"
-              :loading="offShelvingSpuId === row.spuId"
-              @click="confirmOffShelf(row)"
-            >下架</el-button>
-            <span v-if="!canEdit(row.status) && !canSubmitAudit(row.status) && !canOffShelf(row.status) && !getSkus(row).length" class="muted">-</span>
-          </template>
+          <div class="product-actions">
+            <span v-if="row.status === 'PENDING_AUDIT'" class="muted">待平台审核</span>
+            <template v-else>
+              <el-button v-if="canEdit(row.status)" link type="primary" @click="editProduct(row)">编辑</el-button>
+              <el-button
+                v-if="getSkus(row).length"
+                link
+                type="primary"
+                :disabled="stockSubmitting"
+                @click="openProductStockDialog(row)"
+              >调整库存</el-button>
+              <el-button
+                v-if="canSubmitAudit(row.status)"
+                link
+                type="primary"
+                :loading="submittingSpuId === row.spuId"
+                @click="confirmSubmitAudit(row)"
+              >{{ getSubmitAuditLabel(row.status) }}</el-button>
+              <el-button
+                v-if="canOffShelf(row.status)"
+                link
+                type="warning"
+                :loading="offShelvingSpuId === row.spuId"
+                @click="confirmOffShelf(row)"
+              >下架</el-button>
+              <span v-if="!canEdit(row.status) && !canSubmitAudit(row.status) && !canOffShelf(row.status) && !getSkus(row).length" class="muted">-</span>
+            </template>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -682,6 +684,7 @@ onMounted(async () => {
     v-model="stockDialogVisible"
     :title="`调整库存：${stockProduct?.title || '-'}`"
     width="760px"
+    class="stock-dialog"
     @closed="resetStockDialog"
   >
     <el-table :data="getSkus(stockProduct)" border>
@@ -724,20 +727,21 @@ onMounted(async () => {
   gap: 16px;
 }
 .title {
-  color: #333;
-  font-weight: 600;
-  line-height: 24px;
+  color: #1f2937;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 26px;
 }
 .description {
   margin-top: 4px;
-  color: #999;
+  color: #94a3b8;
   font-size: 13px;
 }
 .filter-bar {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px 12px;
   flex-wrap: wrap;
 }
 .keyword-input {
@@ -753,42 +757,51 @@ onMounted(async () => {
   width: 170px;
 }
 .batch-bar {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fafbfd;
 }
 .product-thumb {
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
   object-fit: cover;
   border: 1px solid #e8e8e8;
-  border-radius: 4px;
+  border-radius: 6px;
   background: #f7f8fa;
   color: #999;
   font-size: 12px;
   line-height: 16px;
   text-align: center;
 }
-.stock-list { display: flex; flex-direction: column; gap: 8px; }
+.stock-list { display: flex; flex-direction: column; gap: 8px; max-width: 340px; }
 .stock-line {
   display: grid;
   grid-template-columns: minmax(100px, 1fr) minmax(86px, auto);
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  padding-bottom: 7px;
+  border-bottom: 1px dashed #edf0f5;
 }
+.stock-line:last-child { padding-bottom: 0; border-bottom: 0; }
 .stock-main,
 .stock-values { display: flex; flex-direction: column; gap: 3px; line-height: 1.4; }
 .stock-spec { color: #333; }
 .sku-id { color: #999; font-size: 12px; }
 .muted { color: #999; }
 .reject-reason { color: #f56c6c; }
+.product-actions { display: flex; align-items: center; gap: 4px; min-height: 28px; white-space: nowrap; }
 .pagination-bar {
-  margin-top: 16px;
+  margin-top: 18px;
+  padding-top: 2px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -796,6 +809,12 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 .summary {
-  color: #666;
+  color: #64748b;
+}
+.stock-dialog :deep(.el-dialog__body) { padding-top: 8px; }
+.stock-dialog :deep(.el-input-number) { width: 140px; }
+@media (max-width: 900px) {
+  .keyword-input { width: min(100%, 360px); }
+  .category-filter, .status-filter, .stock-alert-filter { width: 160px; }
 }
 </style>

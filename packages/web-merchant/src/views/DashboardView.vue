@@ -158,7 +158,7 @@ onUnmounted(() => {
 
 <template>
   <div v-loading="loading" class="dashboard">
-    <el-card shadow="never">
+    <el-card shadow="never" class="shop-card">
       <template #header>
         <div class="card-header">
           <div>
@@ -177,7 +177,7 @@ onUnmounted(() => {
       </el-descriptions>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="summary-card">
       <template #header>
         <div class="card-header">
           <div>
@@ -195,7 +195,7 @@ onUnmounted(() => {
           <div class="stat-card" :class="[{ clickable: item.path }, `is-${item.type}`]" @click="openStatCard(item)">
             <div class="stat-label">{{ item.label }}</div>
             <div class="stat-value">{{ getNumber(item.key) }}</div>
-            <el-tag size="small" :type="item.type">实时统计</el-tag>
+            <span class="stat-note">实时更新</span>
           </div>
         </el-col>
       </el-row>
@@ -228,38 +228,47 @@ onUnmounted(() => {
   gap: 16px;
 }
 .title {
-  color: #333;
-  font-weight: 600;
-  line-height: 24px;
+  color: #1f2937;
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 26px;
 }
 .description {
   margin-top: 4px;
-  color: #999;
+  color: #94a3b8;
   font-size: 13px;
 }
+.shop-card :deep(.el-descriptions__label) { width: 110px; color: #64748b; background: #fafbfd; }
+.shop-card :deep(.el-descriptions__content) { color: #1f2937; font-weight: 500; }
+.summary-card :deep(.el-card__body) { padding-bottom: 4px; }
 .stat-card {
-  min-height: 116px;
+  min-height: 128px;
   margin-bottom: 16px;
-  padding: 18px;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  background: #fff;
+  padding: 18px 20px;
+  border: 1px solid #e8edf5;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fff 0%, #fbfcff 100%);
+  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
 }
 .stat-card.clickable { cursor: pointer; }
-.stat-card.clickable:hover { border-color: #f56c6c; box-shadow: 0 4px 12px rgba(245, 108, 108, .12); }
-.stat-card.is-danger { border-color: #fbc4c4; }
-.stat-card.is-warning { border-color: #f3d19e; }
-.todo-list { display: flex; flex-direction: column; gap: 10px; }
-.todo-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #ebeef5; border-radius: 6px; color: #606266; cursor: pointer; }
-.todo-item:hover { border-color: #409eff; }
+.stat-card.clickable:hover { border-color: #9cc7ff; box-shadow: 0 8px 20px rgba(22, 119, 255, .1); transform: translateY(-2px); }
+.stat-card.is-danger { border-left: 3px solid #f56c6c; }
+.stat-card.is-warning { border-left: 3px solid #e6a23c; }
+.stat-card.is-success { border-left: 3px solid #67c23a; }
+.stat-card.is-primary { border-left: 3px solid #409eff; }
+.todo-list { display: flex; flex-direction: column; gap: 8px; }
+.todo-item { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid #edf0f5; border-radius: 8px; color: #475569; cursor: pointer; transition: background .2s ease, border-color .2s ease; }
+.todo-item:hover { border-color: #b8d6ff; background: #f7fbff; }
 .stat-label {
-  color: #666;
+  color: #64748b;
   font-size: 13px;
 }
 .stat-value {
-  margin: 10px 0;
-  color: #333;
-  font-size: 30px;
-  font-weight: 600;
+  margin: 12px 0 6px;
+  color: #1e293b;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
 }
+.stat-note { color: #94a3b8; font-size: 12px; }
 </style>

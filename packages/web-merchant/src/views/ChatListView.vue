@@ -121,9 +121,9 @@ onMounted(loadThreads);
 </script>
 
 <template>
-  <div class="page">
+  <div class="page chat-page">
     <div class="toolbar">
-      <el-radio-group v-model="statusFilter" @change="loadThreads">
+      <el-radio-group v-model="statusFilter" class="thread-tabs" @change="loadThreads">
         <el-radio-button label="OPEN">进行中</el-radio-button>
         <el-radio-button label="CLOSED">已关闭</el-radio-button>
         <el-radio-button label="ALL">全部</el-radio-button>
@@ -134,7 +134,7 @@ onMounted(loadThreads);
           <el-option label="售后单号从大到小" value="AFTER_SALE_DESC" />
           <el-option label="售后单号从小到大" value="AFTER_SALE_ASC" />
         </el-select>
-        <el-tag type="danger" effect="dark">当前未读消息 {{ unreadCount }} 条</el-tag>
+        <el-tag type="danger" effect="light" class="unread-summary">当前未读消息 {{ unreadCount }} 条</el-tag>
         <el-button @click="loadThreads">刷新</el-button>
       </div>
     </div>
@@ -168,8 +168,10 @@ onMounted(loadThreads);
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openChat(row)">{{ getThreadActionLabel(row) }}</el-button>
-          <el-button v-if="row.afterSaleId" link @click="viewAfterSale(row)">查看售后</el-button>
+          <div class="thread-actions">
+            <el-button link type="primary" @click="openChat(row)">{{ getThreadActionLabel(row) }}</el-button>
+            <el-button v-if="row.afterSaleId" link @click="viewAfterSale(row)">查看售后</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -185,13 +187,21 @@ onMounted(loadThreads);
 </template>
 
 <style scoped>
-.page { background: #fff; padding: 16px; border-radius: 8px; }
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
-.toolbar-actions { display: flex; align-items: center; gap: 12px; }
+.page { background: #fff; padding: 20px; border: 1px solid #e7ebf1; border-radius: 10px; box-shadow: 0 2px 8px rgba(15, 29, 54, .035); }
+.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+.toolbar-actions { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }
+.thread-tabs :deep(.el-radio-button__inner) { min-width: 76px; border-color: #e2e8f0; box-shadow: none; }
+.thread-tabs :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) { box-shadow: -1px 0 0 0 #409eff; }
 .sort-select { width: 180px; }
-.after-sale-filter { margin: -4px 0 12px; }
+.unread-summary { font-weight: 600; }
+.after-sale-filter { margin: -2px 0 14px; }
 .after-sale-status-tag { margin-top: 6px; }
-.order-no { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.order-no { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .unread-badge { min-width: 20px; }
-.muted { color: #999; }
+.thread-actions { display: flex; align-items: center; gap: 4px; min-height: 30px; white-space: nowrap; }
+.muted { color: #94a3b8; }
+@media (max-width: 720px) {
+  .page { padding: 16px; }
+  .toolbar-actions { width: 100%; }
+}
 </style>

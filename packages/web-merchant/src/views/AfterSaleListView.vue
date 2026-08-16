@@ -420,7 +420,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <el-card shadow="never">
+  <el-card shadow="never" class="after-sale-page">
     <template #header>
       <div class="card-header">
         <div>
@@ -610,20 +610,21 @@ onMounted(() => {
   gap: 16px;
 }
 .title {
-  color: #333;
-  font-weight: 600;
-  line-height: 24px;
+  color: #1f2937;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 26px;
 }
 .description {
   margin-top: 4px;
-  color: #999;
+  color: #94a3b8;
   font-size: 13px;
 }
 .filter-bar {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px 12px;
   flex-wrap: wrap;
 }
 .keyword-input {
@@ -632,23 +633,23 @@ onMounted(() => {
 .status-filter {
   width: 180px;
 }
-.items { display: flex; flex-direction: column; gap: 6px; }
-.item-line { display: flex; justify-content: space-between; gap: 12px; }
+.items { display: flex; flex-direction: column; gap: 7px; }
+.item-line { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
 .item-title { color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-meta { flex: none; color: #666; }
 .reason-text { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.status-description { margin-top: 6px; color: #666; font-size: 12px; line-height: 18px; }
-.unread-tag { margin-left: 6px; }
-.communication-tip { margin-top: 6px; color: #e6a23c; font-size: 12px; line-height: 18px; }
-.after-sale-timeline { display: flex; flex-direction: column; gap: 8px; }
-.timeline-step { position: relative; display: flex; gap: 8px; min-height: 32px; color: #999; font-size: 12px; }
+.status-description { margin-top: 6px; color: #64748b; font-size: 12px; line-height: 18px; }
+.unread-tag { margin: 6px 0 0; }
+.communication-tip { margin-top: 6px; color: #d97706; font-size: 12px; line-height: 18px; }
+.after-sale-timeline { display: flex; flex-direction: column; gap: 7px; min-width: 210px; }
+.timeline-step { position: relative; display: flex; gap: 8px; min-height: 30px; color: #94a3b8; font-size: 12px; }
 .timeline-step:not(:last-child)::after {
   position: absolute;
   top: 22px;
   left: 9px;
   width: 1px;
   height: calc(100% - 12px);
-  background: #dcdfe6;
+  background: #e2e8f0;
   content: '';
 }
 .timeline-index {
@@ -661,15 +662,15 @@ onMounted(() => {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #dcdfe6;
+  background: #cbd5e1;
   color: #fff;
   font-size: 11px;
 }
 .timeline-content { min-width: 0; flex: 1; }
 .timeline-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; line-height: 18px; }
 .timeline-state { flex: none; font-size: 11px; }
-.timeline-time, .timeline-note { margin-top: 2px; color: #999; line-height: 18px; }
-.timeline-note { color: #606266; }
+.timeline-time, .timeline-note { margin-top: 2px; color: #94a3b8; line-height: 18px; }
+.timeline-note { color: #64748b; }
 .timeline-step.is-done { color: #67c23a; }
 .timeline-step.is-current { color: #409eff; font-weight: 600; }
 .timeline-step.is-rejected { color: #f56c6c; }
@@ -677,11 +678,11 @@ onMounted(() => {
 .timeline-step.is-current .timeline-index { background: #409eff; }
 .timeline-step.is-rejected .timeline-index { background: #f56c6c; }
 .return-progress { margin-bottom: 5px; color: #409eff; font-size: 12px; font-weight: 600; }
-.shipment-info { color: #333; font-size: 13px; line-height: 21px; }
-.muted { color: #999; }
-.after-sale-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shipment-info { color: #334155; font-size: 13px; line-height: 21px; }
+.muted { color: #94a3b8; }
+.after-sale-actions { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; min-height: 30px; }
 .pagination-bar {
-  margin-top: 16px;
+  margin-top: 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -689,6 +690,10 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 .summary {
-  color: #666;
+  color: #64748b;
+}
+@media (max-width: 900px) {
+  .keyword-input { width: min(100%, 420px); }
+  .after-sale-timeline { min-width: 190px; }
 }
 </style>
