@@ -1,7 +1,13 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { fetchChatMessages, fetchChatThreads, runChatAction, sendChatMessage } from '@/api/chat';
+import {
+  closeChatThread,
+  fetchChatMessages,
+  fetchChatThreads,
+  runChatAction,
+  sendChatMessage,
+} from '@/api/chat';
 
 const loading = ref(false);
 const threads = ref([]);
@@ -115,6 +121,22 @@ async function insertCard() {
     ElMessage.error(e.message || '发送卡片失败');
   } finally {
     sending.value = false;
+  }
+}
+
+async function onCloseThread() {
+  if (!activeId.value) return;
+  try {
+    await ElMessageBox.confirm('确认结束该客服会话？结束后不可再发送消息。', '结束会话', {
+      type: 'warning',
+    });
+    await closeChatThread(activeId.value);
+    ElMessage.success('会话已关闭');
+    activeId.value = null;
+    messages.value = [];
+    await loadThreads();
+  } catch (e) {
+    if (e !== 'cancel' && e?.message) ElMessage.error(e.message);
   }
 }
 
@@ -261,6 +283,7 @@ onUnmounted(stopPoll);
               更改订单状态
             </el-button>
           </div>
+          <el-button size="small" type="info" plain @click="onCloseThread">结束会话</el-button>
         </div>
 
         <div id="cs-chat-scroll" class="msg-list">

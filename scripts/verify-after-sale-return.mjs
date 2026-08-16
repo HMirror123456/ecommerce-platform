@@ -50,9 +50,9 @@ if (userLogin.status !== 200 || merchantLogin.status !== 200) {
 const userToken = userLogin.data.token;
 const merchantToken = merchantLogin.data.token;
 
-// seed id=2: RETURN_REFUND + APPROVED, orderId=10002, merchantId=1
+// seed id=2: RETURN_REFUND + APPROVED, orderId=10004, merchantId=1
 const afterSaleId = 2;
-const orderId = 10002;
+const orderId = 10004;
 
 const badState = await request('POST', `/orders/${orderId}/after-sales/${afterSaleId}/return`, {
   token: userToken,

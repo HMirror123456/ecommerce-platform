@@ -79,7 +79,7 @@ const router = createRouter({
               path: 'chats',
               name: 'user-chats',
               component: () => import('@/views/ChatListView.vue'),
-              meta: { title: '我的客服会话' },
+              meta: { title: '沟通会话' },
             },
           ],
         },

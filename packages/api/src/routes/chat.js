@@ -3,9 +3,10 @@ import {
   ensureUserCsThread,
   ensureUserMerchantThread,
   ensureOrderMerchantThread,
-  ensureUserMerchantThreadForMerchant,
-  ensureUserMerchantThreadForUser,
+  closeChatThread,
+  getAfterSaleChatThread,
   getChatMessages,
+  getChatUnreadCount,
   listChatThreads,
   postChatMessage,
   runChatAction,
@@ -33,8 +34,21 @@ router.post('/after-sales/:afterSaleId/chat/thread', requireUser, async (req, re
     const result = await ensureUserCsThread(req.user.id, Number(req.params.afterSaleId));
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
     if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
     if (result.error) return res.status(400).json({ message: result.message });
     res.status(result.created ? 201 : 200).json(result.thread);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/after-sales/:afterSaleId/chat/thread', requireUserMerchantOrCs, async (req, res, next) => {
+  try {
+    const result = await getAfterSaleChatThread(chatActor(req), Number(req.params.afterSaleId), 'USER_CS');
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.json(result.thread);
   } catch (err) {
     next(err);
   }
@@ -64,6 +78,32 @@ router.post(
   },
 );
 
+router.get(
+  '/after-sales/:afterSaleId/merchant-chat/thread',
+  requireUserMerchantOrCs,
+  async (req, res, next) => {
+    try {
+      if (req.admin) {
+        return res.status(403).json({ message: '平台客服请使用 USER_CS 会话' });
+      }
+      const result = await getAfterSaleChatThread(
+        chatActor(req),
+        Number(req.params.afterSaleId),
+        'USER_MERCHANT',
+      );
+      if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+      if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+      if (result.error) return res.status(400).json({ message: result.message });
+      res.json(result.thread);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.post('/orders/:orderId/merchant-chat/thread', requireUser, async (req, res, next) => {
+  try {
+    const result = await ensureOrderMerchantThread(req.user.id, Number(req.params.orderId), req.body || {});
 /** 用户开订单级商家沟通 */
 router.post('/orders/:orderId/merchant-chat/thread', requireUser, async (req, res, next) => {
   try {
@@ -83,6 +123,13 @@ router.post('/orders/:orderId/merchant-chat/thread', requireUser, async (req, re
   }
 });
 
+/** 商家端开聊入口（与 openapi / web-merchant 对齐） */
+router.post('/merchant/after-sales/:afterSaleId/chat/thread', requireMerchant, async (req, res, next) => {
+  try {
+    const result = await ensureUserMerchantThread(
+      { kind: 'merchant', merchant: req.merchant },
+      Number(req.params.afterSaleId),
+    );
 /** 商家侧开售后沟通（兼容入口） */
 router.post('/merchant/after-sales/:afterSaleId/chat/thread', requireMerchant, async (req, res, next) => {
   try {
@@ -126,6 +173,15 @@ router.get('/chat/threads', requireUserMerchantOrCs, async (req, res, next) => {
   }
 });
 
+router.get('/chat/unread-count', requireUserMerchantOrCs, async (req, res, next) => {
+  try {
+    const result = await getChatUnreadCount(chatActor(req));
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/chat/threads/:threadId/messages', requireUserMerchantOrCs, async (req, res, next) => {
   try {
     const result = await getChatMessages(chatActor(req), Number(req.params.threadId), {
@@ -151,6 +207,47 @@ router.post('/chat/threads/:threadId/messages', requireUserMerchantOrCs, async (
   }
 });
 
+router.post('/chat/threads/:threadId/close', requireUserMerchantOrCs, async (req, res, next) => {
+  try {
+    const result = await closeChatThread(chatActor(req), Number(req.params.threadId));
+    if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+    if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+    if (result.error) return res.status(400).json({ message: result.message });
+    res.json(result.thread);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post(
+  '/chat/threads/:threadId/actions/:actionKey',
+  async (req, res, next) => {
+    // 客服动作走 admin；商家动作走 merchant
+    const key = String(req.params.actionKey || '').toUpperCase();
+    if (key.startsWith('MERCHANT_')) {
+      return requireMerchant(req, res, async (err) => {
+        if (err) return next(err);
+        try {
+          const result = await runMerchantChatAction(
+            req.merchant,
+            Number(req.params.threadId),
+            key,
+            req.body || {},
+          );
+          if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
+          if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
+          if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });
+          if (result.error === 'REASON_REQUIRED' || result.error === 'INVALID') {
+            return res.status(400).json({ message: result.message });
+          }
+          if (result.error) return res.status(400).json({ message: result.message });
+          res.json({ message: result.message, afterSale: result.afterSale || null });
+        } catch (e) {
+          next(e);
+        }
+      });
+    }
+    return requireAdmin(['CS_AGENT'])(req, res, async (err) => {
 router.post('/chat/threads/:threadId/actions/:actionKey', async (req, res, next) => {
   const key = String(req.params.actionKey || '').toUpperCase();
   if (key.startsWith('MERCHANT_')) {

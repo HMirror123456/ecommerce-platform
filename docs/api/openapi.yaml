@@ -1701,6 +1701,8 @@ paths:
     post:
       tags: [chat]
       summary: 用户开聊或获取已有 USER_CS 会话（幂等）
+      description: |
+        已有 OPEN 直接返回。新建仅当售后为 ESCALATED（请先申请平台介入）。
       security:
         - bearerAuth: []
       parameters:
@@ -1726,6 +1728,8 @@ paths:
           description: 非本人售后
         '404':
           description: 售后不存在
+        '409':
+          description: 售后未升级，不允许新建客服会话
 
   /after-sales/{afterSaleId}/merchant-chat/thread:
     post:
@@ -1733,8 +1737,9 @@ paths:
       summary: 开聊或获取已有售后 USER_MERCHANT 会话（幂等）
       description: |
         用户对本人售后开聊；商家对本店售后开聊/取会话。
-        建议售后状态为 APPLIED 时新建；已有 OPEN 会话可直接返回。
-      summary: 用户开聊或获取已有 USER_MERCHANT 会话（幂等）
+        已有 OPEN 会话直接返回。用户新建允许 APPLIED/REJECTED/APPROVED/RETURNING；
+        商家可在 APPLIED/APPROVED/RETURNING/REJECTED 新建或进入。
+        查看历史（含 CLOSED）请用 GET 同路径。升级 ESCALATED 时系统关闭商家会话。
       security:
         - bearerAuth: []
       parameters:
@@ -1914,6 +1919,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatMessage'
+
+  /chat/unread-count:
+    get:
+      tags: [chat]
+      summary: 未读消息总数（当前角色视角）
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unreadCount:
+                    type: integer
+
+  /chat/threads/{threadId}/close:
+    post:
+      tags: [chat]
+      summary: 主动关闭会话
+      description: |
+        用户/商家/客服关闭本人有权访问的 OPEN 会话。
+        另：售后进入 REFUNDED/REJECTED 时系统自动关闭关联会话；
+        平台仲裁同意退货（APPROVED）时关闭 USER_CS；
+        订单取消或整单退款时关闭订单级商家会话。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: threadId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已关闭（或本来已关闭）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 无权操作
+        '404':
+          description: 会话不存在
 
   /chat/threads/{threadId}/actions/{actionKey}:
     post:

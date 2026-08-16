@@ -1,10 +1,13 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { nextTick, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { ChatDotRound, Shop } from '@element-plus/icons-vue';
 import { fetchChatThreads } from '@/api/chat';
+import { escalateAfterSale } from '@/api/order';
 import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
+
+const emit = defineEmits(['chat-read']);
 
 const AFTER_SALE_STATUS_LABELS = {
   APPLIED: '待商家处理',
@@ -36,6 +39,7 @@ const chatOrderId = ref(null);
 const chatMerchantId = ref(null);
 const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
+const chatInitialThread = ref(null);
 
 function formatTime(iso) {
   if (!iso) return '-';
@@ -66,6 +70,7 @@ async function loadThreads() {
     }
     const data = await fetchChatThreads(params);
     threads.value = data.list || [];
+    emit('chat-read');
   } catch (e) {
     ElMessage.error(e.message || '加载会话失败');
     threads.value = [];
@@ -91,23 +96,50 @@ function openChat(row) {
   chatAfterSaleId.value = row.afterSaleId || null;
   chatOrderId.value = row.orderId || null;
   chatMerchantId.value = row.afterSaleId ? null : row.merchantId || null;
+  chatInitialThread.value = row;
   chatVisible.value = true;
 }
 
-function onEscalateFromList() {
-  chatVisible.value = false;
-  if (chatOrderId.value) {
-    router.push({ name: 'order-detail', params: { orderId: chatOrderId.value } });
-    ElMessage.info('请在订单详情中点击「申请平台介入」');
+async function onEscalateFromList() {
+  const afterSaleId = chatAfterSaleId.value;
+  const orderId = chatOrderId.value;
+  if (!afterSaleId || !orderId) {
+    ElMessage.warning('缺少售后或订单信息，无法申请平台介入');
     return;
   }
-  router.push({ name: 'user-orders' });
+  try {
+    await ElMessageBox.confirm(
+      '建议先与商家协商。商家超时未处理或协商不成时，再申请平台介入，由客服仲裁。',
+      '申请平台介入',
+      { type: 'warning' },
+    );
+    await escalateAfterSale(orderId, afterSaleId);
+    ElMessage.success('已申请平台介入，已为您打开平台客服会话');
+    chatVisible.value = false;
+    chatCanEscalate.value = false;
+    chatThreadType.value = 'USER_CS';
+    chatMerchantId.value = null;
+    chatAfterSaleId.value = afterSaleId;
+    chatOrderId.value = orderId;
+    chatInitialThread.value = null;
+    await nextTick();
+    chatVisible.value = true;
+    await loadThreads();
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '升级失败');
+  }
 }
 
 function goOrder(row) {
   if (!row?.orderId) return;
   router.push({ name: 'order-detail', params: { orderId: row.orderId } });
 }
+
+watch(chatVisible, (open) => {
+  if (!open) {
+    loadThreads();
+  }
+});
 
 onMounted(loadThreads);
 </script>
@@ -116,8 +148,8 @@ onMounted(loadThreads);
   <div class="chat-list-page" v-loading="loading">
     <div class="page-header">
       <div>
-        <h2 class="page-title">我的售后会话</h2>
-        <p class="page-subtitle">与平台客服、商家的售后沟通记录</p>
+        <h2 class="page-title">沟通会话</h2>
+        <p class="page-subtitle">与商家、平台客服的订单与售后沟通记录</p>
       </div>
     </div>
 
@@ -180,10 +212,12 @@ onMounted(loadThreads);
             <ChatDotRound v-else />
           </el-icon>
           <span v-if="row.status === 'OPEN'" class="alive-dot" title="进行中" />
+          <span v-if="row.unreadCount > 0" class="unread-dot" :title="`${row.unreadCount} 条未读`" />
         </div>
         <div class="thread-main">
           <div class="title-row">
             <h3 class="title">订单 {{ row.orderNo || '-' }}</h3>
+            <span v-if="row.unreadCount > 0" class="unread-pill">{{ row.unreadCount > 99 ? '99+' : row.unreadCount }}</span>
             <span class="type-pill" :class="row.type === 'USER_MERCHANT' ? 'merchant' : 'cs'">
               {{ threadTypeLabel(row.type) }}
             </span>
@@ -192,9 +226,12 @@ onMounted(loadThreads);
             </span>
           </div>
           <p class="meta">
-            售后 #{{ row.afterSaleId }}
+            <template v-if="row.afterSaleId">
+              售后 #{{ row.afterSaleId }}
+              <template v-if="row.afterSaleStatus"> · {{ afterSaleLabel(row.afterSaleStatus) }}</template>
+            </template>
+            <template v-else>订单沟通</template>
             <template v-if="row.shopName"> · {{ row.shopName }}</template>
-            · {{ afterSaleLabel(row.afterSaleStatus) }}
           </p>
           <p class="time">更新于 {{ formatTime(row.updatedAt) }}</p>
         </div>
@@ -212,7 +249,9 @@ onMounted(loadThreads);
       :merchant-id="chatMerchantId"
       :thread-type="chatThreadType"
       :can-escalate="chatCanEscalate"
+      :initial-thread="chatInitialThread"
       @escalate="onEscalateFromList"
+      @closed="loadThreads"
     />
   </div>
 </template>
@@ -329,6 +368,32 @@ onMounted(loadThreads);
   border: 2px solid #fff;
   box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.45);
   animation: pulse 1.6s ease-out infinite;
+}
+
+.unread-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  border: 2px solid #fff;
+}
+
+.unread-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 @keyframes pulse {

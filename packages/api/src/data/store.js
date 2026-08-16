@@ -294,6 +294,9 @@ export async function expirePendingOrders() {
       cancelReason: 'PAYMENT_TIMEOUT',
     });
     await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
+    await closeOrderMerchantChatThreads(order.orderId, {
+      notice: '订单已取消，订单沟通会话已关闭。',
+    });
   }
   await autoConfirmShippedOrders();
   await escalateOverdueAfterSales();
@@ -389,9 +392,15 @@ async function syncMainOrderFulfillmentStatus(order) {
   return order;
 }
 
-/** 领域规则：商家 48h 未处理 APPLIED → ESCALATED */
+/** 领域规则：商家 48h 未处理 APPLIED → ESCALATED；并关闭对应商家协商会话 */
 export async function escalateOverdueAfterSales() {
-  return afterSaleRepo.escalateOverdue(new Date());
+  const count = await afterSaleRepo.escalateOverdue(new Date());
+  if (count > 0) {
+    await closeOpenMerchantThreadsForEscalatedAfterSales(
+      '售后已升级至平台仲裁，商家协商会话已关闭。请通过平台客服沟通。',
+    );
+  }
+  return count;
 }
 
 /** 进行中 + 已退款 占用可售后数量；REJECTED 不占用 */
@@ -480,12 +489,19 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
     auditedAt: new Date(),
   });
 
+  await closeAfterSaleChatThreads(item.afterSaleId, {
+    notice: '售后已退款完成，相关会话已关闭。',
+  });
+
   const order = await orderRepo.findById(item.orderId);
   if (order && (await isOrderFullyRefundedByAfterSales(order))) {
     await orderRepo.updateOrder(item.orderId, { status: 'REFUNDED' });
     for (const sub of order.subOrders || []) {
       await orderRepo.updateSubOrderStatus(sub.subOrderId, 'REFUNDED');
     }
+    await closeOrderMerchantChatThreads(item.orderId, {
+      notice: '订单已退款完成，订单沟通会话已关闭。',
+    });
   } else if (order && !(await orderHasInProgressAfterSale(item.orderId, item.afterSaleId))) {
     // 部分退款完成且无进行中售后：退出 REFUNDING
     if (order.status === 'REFUNDING') {
@@ -509,11 +525,19 @@ async function finalizeApprovedAfterSale(item, { auditReason = null } = {}) {
  */
 async function approveAfterSale(item, { auditReason = null } = {}) {
   if (item.type === 'RETURN_REFUND') {
+    const fromEscalated = item.status === 'ESCALATED';
     const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
       status: 'APPROVED',
       auditReason: auditReason || '同意退货退款，请用户寄回商品',
       auditedAt: new Date(),
     });
+    // 平台仲裁同意退货：客服工单结束；商家会话保留以便寄回沟通
+    if (fromEscalated) {
+      await closeAfterSaleChatThreads(item.afterSaleId, {
+        types: ['USER_CS'],
+        notice: '平台已裁定同意退货退款，客服会话已关闭。寄回问题请联系商家。',
+      });
+    }
     return { afterSale: afterSaleRepo.serialize(updated) };
   }
   return finalizeApprovedAfterSale(item, { auditReason });
@@ -525,6 +549,9 @@ async function closeRejectedAfterSale(item, reason, { restoreStatus = 'SHIPPED' 
     status: 'REJECTED',
     auditReason: reason?.trim() || null,
     auditedAt: new Date(),
+  });
+  await closeAfterSaleChatThreads(item.afterSaleId, {
+    notice: '售后已拒绝，本轮会话已关闭。如需继续协商可重新联系商家，或申请平台介入。',
   });
   const order = await orderRepo.findById(item.orderId);
   const stillOpen = await orderHasInProgressAfterSale(item.orderId, item.afterSaleId);
@@ -539,6 +566,60 @@ async function closeRejectedAfterSale(item, reason, { restoreStatus = 'SHIPPED' 
     }
   }
   return { afterSale: afterSaleRepo.serialize(updated) };
+}
+
+/** 关闭售后关联的 OPEN 会话，并写入系统提示 */
+async function closeAfterSaleChatThreads(afterSaleId, { notice, types } = {}) {
+  const threads = await chatRepo.listOpenThreadsByAfterSale(afterSaleId, { types });
+  for (const thread of threads) {
+    if (notice) {
+      await chatRepo.createMessage({
+        threadId: thread.id,
+        senderType: 'SYSTEM',
+        senderId: null,
+        msgType: 'TEXT',
+        content: notice,
+        payload: null,
+      });
+    }
+    await chatRepo.closeThread(thread.id);
+  }
+}
+
+/** 关闭订单级（无售后）商家会话 */
+async function closeOrderMerchantChatThreads(orderId, { notice, merchantId } = {}) {
+  const threads = await chatRepo.listOpenOrderMerchantThreads(orderId, { merchantId });
+  for (const thread of threads) {
+    if (notice) {
+      await chatRepo.createMessage({
+        threadId: thread.id,
+        senderType: 'SYSTEM',
+        senderId: null,
+        msgType: 'TEXT',
+        content: notice,
+        payload: null,
+      });
+    }
+    await chatRepo.closeThread(thread.id);
+  }
+}
+
+/** 超时升级后：关闭仍 OPEN 的售后商家会话（售后已是 ESCALATED） */
+async function closeOpenMerchantThreadsForEscalatedAfterSales(notice) {
+  const threads = await chatRepo.listOpenMerchantThreadsForEscalatedAfterSales();
+  for (const thread of threads) {
+    if (notice) {
+      await chatRepo.createMessage({
+        threadId: thread.id,
+        senderType: 'SYSTEM',
+        senderId: null,
+        msgType: 'TEXT',
+        content: notice,
+        payload: null,
+      });
+    }
+    await chatRepo.closeThread(thread.id);
+  }
 }
 
 /** 领域规则：APPROVED + RETURN_REFUND → RETURNING（用户寄回） */
@@ -1284,9 +1365,22 @@ export async function createOrder(userId, { addressId, items, remark }) {
 export async function getOrdersByUser(userId, status) {
   await expirePendingOrders();
   const list = await orderRepo.listByUser(userId, status);
+  const enriched = await Promise.all(
+    list.map(async (o) => {
+      const afterSales = await afterSaleRepo.listByOrderId(o.orderId);
+      const active = afterSales.filter((a) => AFTER_SALE_IN_PROGRESS.has(a.status));
+      const base = serializeOrder(o);
+      return {
+        ...base,
+        afterSaleCount: afterSales.length,
+        activeAfterSaleCount: active.length,
+        afterSaleFocusStatus: active[0]?.status || null,
+      };
+    }),
+  );
   return {
-    total: list.length,
-    list: list.map((o) => serializeOrder(o)),
+    total: enriched.length,
+    list: enriched,
   };
 }
 
@@ -1450,6 +1544,10 @@ export async function escalateAfterSale(userId, orderId, afterSaleId) {
   if (order.status !== 'REFUNDING') {
     await orderRepo.updateOrder(order.orderId, { status: 'REFUNDING' });
   }
+  await closeAfterSaleChatThreads(afterSaleId, {
+    types: ['USER_MERCHANT'],
+    notice: '售后已升级至平台仲裁，商家协商会话已关闭。请通过平台客服沟通。',
+  });
   try {
     await ensureUserCsThread(userId, afterSaleId);
   } catch (err) {
@@ -1539,6 +1637,9 @@ export async function cancelOrder(userId, orderId) {
     cancelReason: 'USER_CANCEL',
   });
   await orderRepo.updateSubOrdersByOrder(order.orderId, 'PENDING_PAYMENT', 'CANCELLED');
+  await closeOrderMerchantChatThreads(order.orderId, {
+    notice: '订单已取消，订单沟通会话已关闭。',
+  });
   const updated = await orderRepo.findById(order.orderId);
   return { order: serializeOrder(updated, { includeSubOrders: true }) };
 }
@@ -1838,8 +1939,12 @@ function buildOrderMerchantCardPayload(order, sub) {
   };
 }
 
-async function enrichThread(thread) {
+async function enrichThread(thread, actor = null) {
   if (!thread) return null;
+  let base;
+  if (thread.afterSaleId) {
+    const item = await afterSaleRepo.findById(thread.afterSaleId);
+    base = {
   const order = thread.orderId ? await orderRepo.findById(thread.orderId) : null;
   const orderStatus = order ? order.status : null;
 
@@ -1858,7 +1963,40 @@ async function enrichThread(thread) {
       orderStatus,
       subOrderStatus,
     };
+  } else {
+    let shopName = null;
+    if (thread.orderId && thread.merchantId) {
+      const order = await orderRepo.findById(thread.orderId);
+      const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
+      shopName = sub?.shopName || null;
+    }
+    base = {
+      ...thread,
+      afterSaleStatus: null,
+      merchantId: thread.merchantId,
+      shopName,
+    };
   }
+
+  // 不向前端暴露内部已读游标
+  delete base.userLastReadMsgId;
+  delete base.merchantLastReadMsgId;
+  delete base.csLastReadMsgId;
+
+  if (!actor) {
+    base.unreadCount = 0;
+    return base;
+  }
+  const reader =
+    actor.kind === 'merchant' ? 'merchant' : actor.kind === 'admin' ? 'cs' : 'user';
+  base.unreadCount = await chatRepo.countUnreadForReader(thread, reader);
+  return base;
+}
+
+function readerOfActor(actor) {
+  if (actor?.kind === 'merchant') return 'merchant';
+  if (actor?.kind === 'admin') return 'cs';
+  return 'user';
   let shopName = null;
   let subOrderStatus = null;
   if (thread.orderId && thread.merchantId && order) {
@@ -1906,7 +2044,7 @@ async function assertThreadAccess(actor, thread) {
   return { error: 'FORBIDDEN', message: '无权访问该会话' };
 }
 
-/** 幂等：用户开聊 / 取已有 USER_CS 会话 */
+/** 幂等：用户开聊 / 取已有 USER_CS 会话（新建仅 ESCALATED，与前端「联系平台客服」一致） */
 export async function ensureUserCsThread(userId, afterSaleId) {
   const item = await afterSaleRepo.findById(afterSaleId);
   if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
@@ -1914,7 +2052,31 @@ export async function ensureUserCsThread(userId, afterSaleId) {
 
   const existing = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_CS');
   if (existing) {
-    return { thread: await enrichThread(existing), created: false };
+    return { thread: await enrichThread(existing, { kind: 'user', user: { id: userId } }), created: false };
+  }
+
+  if (item.status !== 'ESCALATED') {
+    return {
+      error: 'INVALID_STATE',
+      message: '请先申请平台介入后再联系客服',
+    };
+  }
+
+  const latest = await chatRepo.findLatestThreadByAfterSale(afterSaleId, 'USER_CS');
+  if (latest?.status === 'CLOSED') {
+    const reopened = await chatRepo.reopenThread(latest.id);
+    await chatRepo.createMessage({
+      threadId: reopened.id,
+      senderType: 'SYSTEM',
+      senderId: null,
+      msgType: 'TEXT',
+      content: '平台客服会话已重新开启。',
+      payload: null,
+    });
+    return {
+      thread: await enrichThread(reopened, { kind: 'user', user: { id: userId } }),
+      created: true,
+    };
   }
 
   let thread;
@@ -1928,7 +2090,9 @@ export async function ensureUserCsThread(userId, afterSaleId) {
     });
   } catch (err) {
     const again = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_CS');
-    if (again) return { thread: await enrichThread(again), created: false };
+    if (again) {
+      return { thread: await enrichThread(again, { kind: 'user', user: { id: userId } }), created: false };
+    }
     throw err;
   }
 
@@ -1949,12 +2113,28 @@ export async function ensureUserCsThread(userId, afterSaleId) {
     payload: buildAfterSaleCardPayload(item),
   });
 
-  return { thread: await enrichThread(thread), created: true };
+  return { thread: await enrichThread(thread, { kind: 'user', user: { id: userId } }), created: true };
 }
+
+/** 用户新建售后商家会话：协商期 + 寄回履约期问物流/地址 */
+const USER_MERCHANT_CHAT_CREATE_STATUSES = new Set([
+  'APPLIED',
+  'REJECTED',
+  'APPROVED',
+  'RETURNING',
+]);
+/** 商家新建售后会话：仲裁中/已退款不可新建（看历史走列表或 GET） */
+const MERCHANT_CHAT_CREATE_STATUSES = new Set([
+  'APPLIED',
+  'APPROVED',
+  'RETURNING',
+  'REJECTED',
+]);
 
 /**
  * 幂等：USER_MERCHANT 开聊。
  * actor: { kind:'user', user } | { kind:'merchant', merchant }
+ * 已有 OPEN 会话直接返回；新建状态见 USER_/MERCHANT_CHAT_CREATE_STATUSES。
  */
 export async function ensureUserMerchantThread(actor, afterSaleId) {
   const item = await afterSaleRepo.findById(afterSaleId);
@@ -1970,11 +2150,29 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
 
   const existing = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
   if (existing) {
-    return { thread: await enrichThread(existing), created: false };
+    return { thread: await enrichThread(existing, actor), created: false };
   }
 
-  if (item.status !== 'APPLIED') {
+  const allowed =
+    actor.kind === 'merchant'
+      ? MERCHANT_CHAT_CREATE_STATUSES.has(item.status)
+      : USER_MERCHANT_CHAT_CREATE_STATUSES.has(item.status);
+  if (!allowed) {
     return { error: 'INVALID_STATE', message: '当前售后状态不可新建商家会话' };
+  }
+
+  const latest = await chatRepo.findLatestThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
+  if (latest?.status === 'CLOSED') {
+    const reopened = await chatRepo.reopenThread(latest.id);
+    await chatRepo.createMessage({
+      threadId: reopened.id,
+      senderType: 'SYSTEM',
+      senderId: null,
+      msgType: 'TEXT',
+      content: `与「${item.shopName || '商家'}」的协商会话已重新开启。`,
+      payload: null,
+    });
+    return { thread: await enrichThread(reopened, actor), created: true };
   }
 
   let thread;
@@ -1989,7 +2187,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
     });
   } catch (err) {
     const again = await chatRepo.findOpenThreadByAfterSale(afterSaleId, 'USER_MERCHANT');
-    if (again) return { thread: await enrichThread(again), created: false };
+    if (again) return { thread: await enrichThread(again, actor), created: false };
     throw err;
   }
 
@@ -2010,7 +2208,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
     payload: buildAfterSaleCardPayload(item),
   });
 
-  return { thread: await enrichThread(thread), created: true };
+  return { thread: await enrichThread(thread, actor), created: true };
 }
 
 /**
@@ -2097,14 +2295,24 @@ export async function ensureUserMerchantThreadForMerchant(merchantId, afterSaleI
 export async function listChatThreads(actor, { status, type } = {}) {
   if (actor.kind === 'admin') {
     const list = await chatRepo.listThreadsForCs({ status });
-    return Promise.all(list.map(enrichThread));
+    return Promise.all(list.map((t) => enrichThread(t, actor)));
   }
   if (actor.kind === 'merchant') {
     if (type && type !== 'USER_MERCHANT') return [];
     const list = await chatRepo.listThreadsForMerchant(actor.merchant.id, { status });
-    return Promise.all(list.map(enrichThread));
+    return Promise.all(list.map((t) => enrichThread(t, actor)));
   }
   const list = await chatRepo.listThreadsForUser(actor.user.id, { status, type });
+  return Promise.all(list.map((t) => enrichThread(t, actor)));
+}
+
+export async function getChatUnreadCount(actor) {
+  if (actor.kind === 'user') {
+    return { unreadCount: await chatRepo.sumUnreadForUser(actor.user.id) };
+  }
+  const list = await listChatThreads(actor, { status: 'OPEN' });
+  const unreadCount = list.reduce((sum, t) => sum + (Number(t.unreadCount) || 0), 0);
+  return { unreadCount };
   return Promise.all(list.map(enrichThread));
 }
 
@@ -2113,7 +2321,63 @@ export async function getChatMessages(actor, threadId, { afterId } = {}) {
   const denied = await assertThreadAccess(actor, thread);
   if (denied) return denied;
   const list = await chatRepo.listMessages(threadId, { afterId });
+  if (list.length) {
+    await chatRepo.markThreadRead(threadId, readerOfActor(actor), list[list.length - 1].id);
+  } else if (!afterId) {
+    // 首次拉取无增量：把游标推到当前末尾（含仅有己方/系统消息的情况）
+    const all = await chatRepo.listMessages(threadId, {});
+    if (all.length) {
+      await chatRepo.markThreadRead(threadId, readerOfActor(actor), all[all.length - 1].id);
+    }
+  }
   return { list };
+}
+
+/** 查看售后关联会话（含已关闭），不新建 */
+export async function getAfterSaleChatThread(actor, afterSaleId, type) {
+  const item = await afterSaleRepo.findById(afterSaleId);
+  if (!item) return { error: 'NOT_FOUND', message: '售后单不存在' };
+
+  if (actor.kind === 'user') {
+    if (item.userId !== actor.user.id) return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  } else if (actor.kind === 'merchant') {
+    if (type !== 'USER_MERCHANT') return { error: 'FORBIDDEN', message: '商家仅可查看商家会话' };
+    if (item.merchantId !== actor.merchant.id) return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  } else if (actor.kind === 'admin') {
+    if (type !== 'USER_CS') return { error: 'FORBIDDEN', message: '客服仅可查看平台客服会话' };
+  } else {
+    return { error: 'FORBIDDEN', message: '无权操作该售后' };
+  }
+
+  const open = await chatRepo.findOpenThreadByAfterSale(afterSaleId, type);
+  const thread = open || (await chatRepo.findLatestThreadByAfterSale(afterSaleId, type));
+  if (!thread) return { error: 'NOT_FOUND', message: '暂无沟通记录' };
+  return { thread: await enrichThread(thread) };
+}
+
+/** 参与方主动关闭会话（用户 / 商家 / 客服） */
+export async function closeChatThread(actor, threadId) {
+  const thread = await chatRepo.findThreadById(threadId);
+  const denied = await assertThreadAccess(actor, thread);
+  if (denied) return denied;
+  if (thread.status !== 'OPEN') {
+    return { thread: await enrichThread(thread), alreadyClosed: true };
+  }
+
+  let who = '用户';
+  if (actor.kind === 'merchant') who = '商家';
+  else if (actor.kind === 'admin') who = '平台客服';
+
+  await chatRepo.createMessage({
+    threadId: thread.id,
+    senderType: 'SYSTEM',
+    senderId: null,
+    msgType: 'TEXT',
+    content: `会话已由${who}关闭。`,
+    payload: null,
+  });
+  const closed = await chatRepo.closeThread(thread.id);
+  return { thread: await enrichThread(closed), alreadyClosed: false };
 }
 
 export async function postChatMessage(actor, threadId, body = {}) {
@@ -2122,6 +2386,18 @@ export async function postChatMessage(actor, threadId, body = {}) {
   if (denied) return denied;
   if (thread.status !== 'OPEN') return { error: 'INVALID', message: '会话已关闭' };
 
+  // 领域规则：售后进入平台仲裁或已退款后，商家会话仅可查看历史（用户与商家均不可再发）
+  if (thread.type === 'USER_MERCHANT' && thread.afterSaleId) {
+    const afterSale = await afterSaleRepo.findById(thread.afterSaleId);
+    if (!afterSale) return { error: 'NOT_FOUND', message: '关联售后不存在' };
+    if (['ESCALATED', 'REFUNDED'].includes(afterSale.status)) {
+      return {
+        error: 'FORBIDDEN',
+        message:
+          afterSale.status === 'ESCALATED'
+            ? '售后已进入平台仲裁，请通过平台客服沟通'
+            : '售后已结束，仅可查看历史沟通',
+      };
   if (thread.afterSaleId) {
     const afterSale = await afterSaleRepo.findById(thread.afterSaleId);
     if (!afterSale) return { error: 'NOT_FOUND', message: '关联售后不存在' };
@@ -2155,6 +2431,19 @@ export async function postChatMessage(actor, threadId, body = {}) {
     if (!order || !sub) return { error: 'NOT_FOUND', message: '关联订单不存在' };
     payload = payload || buildOrderMerchantCardPayload(order, sub);
     content = content || '订单卡片';
+  }
+
+  let senderType = 'USER';
+  let senderId = null;
+  if (actor.kind === 'admin') {
+    senderType = 'CS_AGENT';
+    senderId = actor.admin.id;
+  } else if (actor.kind === 'merchant') {
+    senderType = 'MERCHANT';
+    senderId = actor.merchant.id;
+  } else {
+    senderType = 'USER';
+    senderId = actor.user.id;
   }
 
   const senderType = actor.kind === 'admin' ? 'CS_AGENT' : actor.kind === 'merchant' ? 'MERCHANT' : 'USER';
@@ -2384,3 +2673,4 @@ export async function runMerchantChatAction(merchant, threadId, actionKey, body 
   });
   return { message, afterSale: result.afterSale };
 }
+

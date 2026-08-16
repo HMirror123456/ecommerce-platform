@@ -1,7 +1,8 @@
 <script setup>
-import { nextTick, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
+  closeMerchantChatThread,
   fetchMerchantChatMessages,
   openMerchantAfterSaleChat,
   sendMerchantChatMessage,
@@ -10,14 +11,17 @@ import {
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   afterSaleId: { type: Number, default: null },
+  /** 订单级等无售后会话：直接传入列表中的 thread */
+  initialThread: { type: Object, default: null },
 });
-const emit = defineEmits(['update:modelValue']);
+const emit = defineEmits(['update:modelValue', 'closed']);
 
 const loading = ref(false);
 const thread = ref(null);
 const messages = ref([]);
 const draft = ref('');
 const sending = ref(false);
+const closing = ref(false);
 let pollTimer = null;
 
 const STATUS_LABELS = {
@@ -33,6 +37,10 @@ const TYPE_LABELS = {
   REFUND_ONLY: '仅退款',
   RETURN_REFUND: '退货退款',
 };
+
+const isOrderThread = computed(() => Boolean(thread.value && !thread.value.afterSaleId));
+
+const drawerTitle = computed(() => (isOrderThread.value ? '订单沟通' : '回复用户'));
 
 function formatTime(iso) {
   if (!iso) return '';
@@ -57,11 +65,15 @@ function typeLabel(type) {
   return TYPE_LABELS[type] || type || '-';
 }
 
+const threadOpen = computed(() => thread.value?.status === 'OPEN');
+
 function isReadOnlyThread() {
+  if (!threadOpen.value) return true;
   return ['REFUNDED', 'ESCALATED'].includes(thread.value?.afterSaleStatus);
 }
 
 function readOnlyHint() {
+  if (!threadOpen.value) return '会话已关闭，无法继续发送';
   if (thread.value?.afterSaleStatus === 'ESCALATED') {
     return '该售后已进入平台仲裁，商家仅可查看历史沟通';
   }
@@ -69,6 +81,14 @@ function readOnlyHint() {
     return '售后已完成，仅查看沟通记录';
   }
   return '';
+}
+
+function metaLine() {
+  if (!thread.value) return '';
+  if (thread.value.afterSaleId) {
+    return `订单 ${thread.value.orderNo} · 售后 #${thread.value.afterSaleId} · ${statusLabel(thread.value.afterSaleStatus)}`;
+  }
+  return `订单 ${thread.value.orderNo} · 订单沟通`;
 }
 
 async function loadMessages(reset) {
@@ -88,10 +108,17 @@ async function loadMessages(reset) {
 }
 
 async function openThread() {
-  if (!props.afterSaleId) return;
   loading.value = true;
   try {
-    thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
+    if (props.afterSaleId) {
+      thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
+    } else if (props.initialThread?.id) {
+      thread.value = props.initialThread;
+    } else {
+      ElMessage.warning('缺少会话信息');
+      emit('update:modelValue', false);
+      return;
+    }
     await loadMessages(true);
     startPoll();
   } catch (e) {
@@ -104,7 +131,7 @@ async function openThread() {
 
 async function onSend() {
   const content = draft.value.trim();
-  if (!content || !thread.value) return;
+  if (!content || !thread.value || isReadOnlyThread()) return;
   sending.value = true;
   try {
     const message = await sendMerchantChatMessage(thread.value.id, { msgType: 'TEXT', content });
@@ -114,6 +141,20 @@ async function onSend() {
     ElMessage.error(e.message || '发送失败，请稍后重试');
   } finally {
     sending.value = false;
+  }
+}
+
+async function onCloseThread() {
+  if (!thread.value?.id || !threadOpen.value || closing.value) return;
+  closing.value = true;
+  try {
+    thread.value = await closeMerchantChatThread(thread.value.id);
+    ElMessage.success('会话已关闭');
+    emit('closed', thread.value);
+  } catch (e) {
+    ElMessage.error(e.message || '关闭会话失败');
+  } finally {
+    closing.value = false;
   }
 }
 
@@ -152,14 +193,24 @@ onUnmounted(stopPoll);
 <template>
   <el-drawer
     :model-value="modelValue"
-    title="回复用户"
+    :title="drawerTitle"
     size="400px"
     @close="onClose"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div v-loading="loading" class="drawer-body">
       <div v-if="thread" class="thread-meta">
-        订单 {{ thread.orderNo }} · 售后 #{{ thread.afterSaleId }} · {{ statusLabel(thread.afterSaleStatus) }}
+        <span>{{ metaLine() }}</span>
+        <el-button
+          v-if="threadOpen"
+          link
+          type="info"
+          size="small"
+          :loading="closing"
+          @click="onCloseThread"
+        >
+          结束会话
+        </el-button>
       </div>
       <div id="merchant-chat-scroll" class="msg-list">
         <el-empty v-if="!loading && !messages.length" description="暂无沟通消息" :image-size="72" />
@@ -172,12 +223,18 @@ onUnmounted(stopPoll);
           <div class="bubble">
             <div class="who">{{ senderLabel(message) }} · {{ formatTime(message.createdAt) }}</div>
             <div v-if="message.msgType === 'CARD'" class="card">
-              <div class="card-title">订单与售后摘要</div>
+              <div class="card-title">{{ isOrderThread ? '订单摘要' : '订单与售后摘要' }}</div>
               <div>订单号：{{ message.payload && message.payload.orderNo }}</div>
-              <div>售后状态：{{ statusLabel(message.payload && message.payload.status) }}</div>
-              <div>售后类型：{{ typeLabel(message.payload && message.payload.type) }}</div>
-              <div>退款金额：¥{{ Number(message.payload && message.payload.amount || 0).toFixed(2) }}</div>
-              <div class="muted">申请原因：{{ message.payload && message.payload.reason }}</div>
+              <template v-if="message.payload && message.payload.afterSaleId">
+                <div>售后状态：{{ statusLabel(message.payload && message.payload.status) }}</div>
+                <div>售后类型：{{ typeLabel(message.payload && message.payload.type) }}</div>
+                <div>退款金额：¥{{ Number(message.payload && message.payload.amount || 0).toFixed(2) }}</div>
+                <div class="muted">申请原因：{{ message.payload && message.payload.reason }}</div>
+              </template>
+              <template v-else>
+                <div v-if="message.payload && message.payload.shopName">店铺：{{ message.payload.shopName }}</div>
+                <div v-if="message.payload && message.payload.status">子单状态：{{ message.payload.status }}</div>
+              </template>
             </div>
             <div v-else class="text">{{ message.content }}</div>
           </div>
@@ -189,7 +246,7 @@ onUnmounted(stopPoll);
           v-model="draft"
           type="textarea"
           :rows="2"
-          placeholder="回复用户的售后问题…"
+          :placeholder="isOrderThread ? '回复用户的订单咨询…' : '回复用户的售后问题…'"
           :disabled="isReadOnlyThread()"
           @keydown.ctrl.enter="onSend"
         />
@@ -201,7 +258,15 @@ onUnmounted(stopPoll);
 
 <style scoped>
 .drawer-body { display: flex; flex-direction: column; height: calc(100vh - 120px); }
-.thread-meta { margin-bottom: 8px; color: #999; font-size: 12px; }
+.thread-meta {
+  margin-bottom: 8px;
+  color: #999;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .msg-list { flex: 1; overflow: auto; padding: 12px; background: #f5f5f5; border-radius: 8px; }
 .bubble-row { display: flex; margin-bottom: 10px; }
 .bubble-row.mine { justify-content: flex-end; }

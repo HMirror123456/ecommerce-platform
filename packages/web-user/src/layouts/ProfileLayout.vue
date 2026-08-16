@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   ChatDotRound,
@@ -9,15 +9,18 @@ import {
   User,
 } from '@element-plus/icons-vue';
 import { useAuthStore } from '@/stores/auth';
+import { fetchChatUnreadCount } from '@/api/chat';
 
 const route = useRoute();
 const auth = useAuthStore();
+const chatUnread = ref(0);
+let unreadTimer = null;
 
 const menus = [
   { name: 'profile', label: '个人信息', path: '/user', icon: User },
   { name: 'user-orders', label: '我的订单', path: '/user/orders', icon: ShoppingBag },
   { name: 'user-favorites', label: '我的收藏', path: '/user/favorites', icon: Goods },
-  { name: 'user-chats', label: '售后会话', path: '/user/chats', icon: ChatDotRound },
+  { name: 'user-chats', label: '沟通会话', path: '/user/chats', icon: ChatDotRound },
   { name: 'user-addresses', label: '收货地址', path: '/user/addresses', icon: Location },
 ];
 
@@ -25,6 +28,7 @@ const orderShortcuts = [
   { label: '待支付', status: 'PENDING_PAYMENT' },
   { label: '待发货', status: 'PENDING_SHIPMENT' },
   { label: '待收货', status: 'SHIPPED' },
+  { label: '退款/售后', status: 'REFUNDING' },
   { label: '已完成', status: 'COMPLETED' },
 ];
 
@@ -37,6 +41,40 @@ const activePath = computed(() => {
 });
 
 const displayName = computed(() => auth.nickname || auth.phone || '用户');
+const unreadBadge = computed(() => {
+  const n = Number(chatUnread.value) || 0;
+  if (n <= 0) return '';
+  return n > 99 ? '99+' : String(n);
+});
+
+async function refreshUnread() {
+  if (!auth.isLoggedIn) {
+    chatUnread.value = 0;
+    return;
+  }
+  try {
+    const data = await fetchChatUnreadCount();
+    chatUnread.value = Number(data.unreadCount) || 0;
+  } catch {
+    /* 角标失败不打扰 */
+  }
+}
+
+watch(
+  () => route.path,
+  () => {
+    refreshUnread();
+  },
+);
+
+onMounted(() => {
+  refreshUnread();
+  unreadTimer = setInterval(refreshUnread, 20000);
+});
+
+onUnmounted(() => {
+  if (unreadTimer) clearInterval(unreadTimer);
+});
 </script>
 
 <template>
@@ -76,12 +114,15 @@ const displayName = computed(() => auth.nickname || auth.phone || '用户');
           :class="{ active: activePath === item.path }"
         >
           <el-icon class="menu-icon"><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
+          <span class="menu-label">{{ item.label }}</span>
+          <span v-if="item.name === 'user-chats' && unreadBadge" class="menu-badge">{{ unreadBadge }}</span>
         </router-link>
       </nav>
     </aside>
     <section class="main-panel">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <component :is="Component" @chat-read="refreshUnread" />
+      </router-view>
     </section>
   </div>
 </template>
@@ -121,121 +162,125 @@ const displayName = computed(() => auth.nickname || auth.phone || '用户');
   align-items: center;
   gap: 12px;
   padding: 20px 16px;
-  background:
-    radial-gradient(circle at 85% 20%, rgba(255, 255, 255, 0.22), transparent 40%),
-    linear-gradient(135deg, #e4393c 0%, #c81623 100%);
-  color: #fff;
+  background: linear-gradient(135deg, #fff1f0, #fff);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .avatar {
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-primary);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
   font-weight: 700;
-  flex-shrink: 0;
   overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.65);
+  flex-shrink: 0;
 }
 
 .avatar-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
 }
 
-.name {
-  margin: 0 0 4px;
-  font-weight: 700;
-  font-size: 16px;
-}
-
-.phone {
+.meta .name {
   margin: 0;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.meta .phone {
+  margin: 4px 0 0;
   font-size: 12px;
-  opacity: 0.88;
+  color: var(--text-muted);
 }
 
 .shortcut-block {
   padding: 14px 12px 8px;
-  border-bottom: 1px solid var(--border-color);
 }
 
 .shortcut-title {
-  margin: 0 0 10px 4px;
+  margin: 0 0 8px 4px;
   font-size: 12px;
   color: var(--text-muted);
-  font-weight: 600;
 }
 
 .shortcut-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .shortcut-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 6px;
+  text-align: center;
+  padding: 8px 4px;
   border-radius: 8px;
   background: #fafafa;
   border: 1px solid var(--border-color);
-  color: var(--text-body);
   font-size: 12px;
+  color: var(--text-body);
   text-decoration: none;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .shortcut-item:hover {
-  background: #fff1f0;
-  border-color: #ffccc7;
+  border-color: #ffb4b4;
   color: var(--color-primary);
-  font-weight: 600;
 }
 
 .menu {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px;
+  padding: 4px 8px 8px;
+  gap: 2px;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 12px;
+  padding: 10px 12px;
   border-radius: 8px;
   color: var(--text-body);
   text-decoration: none;
-  transition: background 0.15s, color 0.15s;
+  font-size: 14px;
 }
 
-.menu-icon {
-  font-size: 16px;
+.menu-item:hover {
+  background: #fff1f0;
+  color: var(--color-primary);
 }
 
-.menu-item:hover,
 .menu-item.active {
   background: #fff1f0;
   color: var(--color-primary);
   font-weight: 600;
 }
 
+.menu-icon {
+  font-size: 18px;
+}
+
+.menu-label {
+  flex: 1;
+}
+
+.menu-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
 .main-panel {
   min-width: 0;
-  background: #fff;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
 }
 </style>

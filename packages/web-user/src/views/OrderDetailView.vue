@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -12,6 +12,7 @@ import {
   submitAfterSaleReturn,
 } from '@/api/order';
 import { addCartItem } from '@/api/cart';
+import { getAfterSaleChatThread, getMerchantChatThread } from '@/api/chat';
 import AfterSaleChatDrawer from '@/components/AfterSaleChatDrawer.vue';
 
 const ORDER_STATUS_LABELS = {
@@ -68,6 +69,7 @@ const chatOrderId = ref(null);
 const chatMerchantId = ref(null);
 const chatThreadType = ref('USER_CS');
 const chatCanEscalate = ref(false);
+const chatInitialThread = ref(null);
 const merchantChatTarget = ref(null);
 
 /** 驱动支付倒计时刷新 */
@@ -321,10 +323,13 @@ function escalateButtonLabel(afterSale) {
 
 function escalateHint(afterSale) {
   if (afterSale.status === 'REJECTED') {
-    return '商家已拒绝本次售后，可升级由平台客服仲裁。';
+    return '建议先联系商家协商；仍无法解决可申请平台介入。';
   }
   if (afterSale.status === 'APPLIED') {
-    return '商家需在 48 小时内处理；超时或协商不成可申请平台介入。';
+    return '建议先联系商家协商。商家需在 48 小时内处理；超时或协商不成可申请平台介入。';
+  }
+  if (afterSale.status === 'APPROVED' || afterSale.status === 'RETURNING') {
+    return '寄回相关问题可联系商家确认地址或物流进度。';
   }
   return '';
 }
@@ -488,8 +493,8 @@ async function onEscalate(afterSale) {
   try {
     await ElMessageBox.confirm(
       afterSale.status === 'REJECTED'
-        ? '商家已拒绝售后，确认申请平台介入并由客服仲裁？'
-        : '确认申请平台介入？适用于商家超时未处理或协商不成的情况。',
+        ? '商家已拒绝售后。建议先通过「联系商家协商」沟通；仍无法解决再申请平台介入，由客服仲裁。'
+        : '建议先通过「联系商家协商」沟通。商家超时未处理或协商不成时，再申请平台介入。',
       '申请平台介入',
       { type: 'warning' },
     );
@@ -511,7 +516,19 @@ function canContactCs(afterSale) {
 }
 
 function canContactMerchant(afterSale) {
-  return afterSale?.status === 'APPLIED';
+  return ['APPLIED', 'REJECTED', 'APPROVED', 'RETURNING'].includes(afterSale?.status);
+}
+
+function merchantChatButtonLabel(afterSale) {
+  if (afterSale?.status === 'APPROVED' || afterSale?.status === 'RETURNING') {
+    return '联系商家';
+  }
+  return '联系商家协商';
+}
+
+/** 已拒绝/已退款：回看历史（拒绝后仍可另开「联系商家协商」） */
+function canViewChatHistory(afterSale) {
+  return afterSale?.status === 'REFUNDED' || afterSale?.status === 'REJECTED';
 }
 
 function canContactShop(sub) {
@@ -524,6 +541,7 @@ function openCsChat(afterSale) {
   chatThreadType.value = 'USER_CS';
   chatCanEscalate.value = false;
   merchantChatTarget.value = null;
+  chatInitialThread.value = null;
   chatAfterSaleId.value = afterSale.afterSaleId;
   chatOrderId.value = null;
   chatMerchantId.value = null;
@@ -534,6 +552,7 @@ function openMerchantChatDrawer(afterSale) {
   chatThreadType.value = 'USER_MERCHANT';
   chatCanEscalate.value = canEscalate(afterSale);
   merchantChatTarget.value = afterSale;
+  chatInitialThread.value = null;
   chatAfterSaleId.value = afterSale.afterSaleId;
   chatOrderId.value = null;
   chatMerchantId.value = null;
@@ -544,10 +563,35 @@ function openShopChat(sub) {
   chatThreadType.value = 'USER_MERCHANT';
   chatCanEscalate.value = false;
   merchantChatTarget.value = null;
+  chatInitialThread.value = null;
   chatAfterSaleId.value = null;
   chatOrderId.value = order.value.orderId;
   chatMerchantId.value = sub.merchantId;
   chatVisible.value = true;
+}
+
+async function openChatHistory(afterSale) {
+  try {
+    let thread = null;
+    let type = 'USER_MERCHANT';
+    try {
+      thread = await getMerchantChatThread(afterSale.afterSaleId);
+      type = 'USER_MERCHANT';
+    } catch {
+      thread = await getAfterSaleChatThread(afterSale.afterSaleId);
+      type = 'USER_CS';
+    }
+    chatThreadType.value = type;
+    chatCanEscalate.value = false;
+    merchantChatTarget.value = null;
+    chatInitialThread.value = thread;
+    chatAfterSaleId.value = afterSale.afterSaleId;
+    chatOrderId.value = null;
+    chatMerchantId.value = null;
+    chatVisible.value = true;
+  } catch (e) {
+    ElMessage.warning(e.message || '暂无沟通记录');
+  }
 }
 
 async function onEscalateFromChat() {
@@ -588,8 +632,15 @@ async function onSubmitReturn() {
   }
 }
 
-onMounted(() => {
-  loadOrder();
+async function scrollToAfterSalesIfNeeded() {
+  if (route.hash !== '#after-sales') return;
+  await nextTick();
+  document.getElementById('after-sales')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+onMounted(async () => {
+  await loadOrder();
+  await scrollToAfterSalesIfNeeded();
   tickTimer = setInterval(() => {
     nowMs.value = Date.now();
   }, 1000);
@@ -742,7 +793,7 @@ onUnmounted(() => {
         </div>
       </el-card>
 
-      <el-card shadow="never" class="section-card">
+      <el-card id="after-sales" shadow="never" class="section-card">
         <template #header>
           <div class="card-header">
             <span class="card-title">售后记录</span>
@@ -782,7 +833,7 @@ onUnmounted(() => {
               size="small"
               @click="openMerchantChatDrawer(as)"
             >
-              联系商家协商
+              {{ merchantChatButtonLabel(as) }}
             </el-button>
             <el-button
               v-if="canEscalate(as)"
@@ -812,6 +863,15 @@ onUnmounted(() => {
               @click="openReturnDialog(as)"
             >
               填写寄回物流
+            </el-button>
+            <el-button
+              v-if="canViewChatHistory(as)"
+              link
+              type="primary"
+              size="small"
+              @click="openChatHistory(as)"
+            >
+              查看沟通记录
             </el-button>
           </div>
         </div>
@@ -908,6 +968,7 @@ onUnmounted(() => {
       :merchant-id="chatMerchantId"
       :thread-type="chatThreadType"
       :can-escalate="chatCanEscalate"
+      :initial-thread="chatInitialThread"
       @escalate="onEscalateFromChat"
     />
   </div>

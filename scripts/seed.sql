@@ -202,9 +202,10 @@ INSERT INTO after_sales (
    DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 4 DAY), DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY), NULL, NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 2 DAY), NULL,
    '[{"skuId":1001,"title":"无线蓝牙耳机 Pro","price":299,"quantity":1}]');
 
-INSERT INTO chat_threads (id, type, after_sale_id, order_id, order_no, user_id, status, created_at, updated_at) VALUES
-  (1, 'USER_CS', 5, 10007, 'ORD-DEMO-10007', 1, 'OPEN', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY), UTC_TIMESTAMP(3)),
-  (2, 'USER_MERCHANT', 1, 10003, 'ORD-DEMO-10003', 1, 'OPEN', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY), UTC_TIMESTAMP(3));
+INSERT INTO chat_threads (id, type, after_sale_id, order_id, order_no, user_id, merchant_id, status, created_at, updated_at) VALUES
+  (1, 'USER_CS', 5, 10007, 'ORD-DEMO-10007', 1, NULL, 'OPEN', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY), UTC_TIMESTAMP(3)),
+  (2, 'USER_MERCHANT', 1, 10003, 'ORD-DEMO-10003', 1, 1, 'OPEN', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY), UTC_TIMESTAMP(3)),
+  (3, 'USER_MERCHANT', NULL, 10002, 'ORD-DEMO-10002', 1, 1, 'OPEN', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 12 HOUR), UTC_TIMESTAMP(3));
 
 INSERT INTO chat_messages (thread_id, sender_type, sender_id, msg_type, content, payload_json, created_at) VALUES
   (1, 'SYSTEM', NULL, 'TEXT', '已接入平台客服会话，请描述您的问题。', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY)),
@@ -214,4 +215,8 @@ INSERT INTO chat_messages (thread_id, sender_type, sender_id, msg_type, content,
   (2, 'SYSTEM', NULL, 'TEXT', '已建立用户与商家的售后沟通会话，请围绕该售后订单协商处理。', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY)),
   (2, 'SYSTEM', NULL, 'CARD', '售后订单卡片', '{"afterSaleId":1,"orderId":10003,"orderNo":"ORD-DEMO-10003","shopName":"数码旗舰店","type":"REFUND_ONLY","status":"APPLIED","reason":"耳机降噪效果与描述不符，申请仅退款","amount":299}', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY)),
   (2, 'USER', 1, 'TEXT', '耳机在嘈杂环境下的降噪效果没有达到预期。', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 23 HOUR)),
-  (2, 'MERCHANT', 1, 'TEXT', '您好，我们已收到反馈，正在核实商品与订单情况。', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 22 HOUR));
+  (2, 'MERCHANT', 1, 'TEXT', '您好，我们已收到反馈，正在核实商品与订单情况。', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 22 HOUR)),
+  (3, 'SYSTEM', NULL, 'TEXT', '已接入与「数码旗舰店」的订单沟通，可咨询发货、规格颜色等问题。', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 12 HOUR)),
+  (3, 'SYSTEM', NULL, 'CARD', '订单卡片', '{"orderId":10002,"orderNo":"ORD-DEMO-10002","shopName":"数码旗舰店","status":"SHIPPED"}', DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 12 HOUR)),
+  (3, 'USER', 1, 'TEXT', '请问这单大概什么时候能到？', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 11 HOUR)),
+  (3, 'MERCHANT', 1, 'TEXT', '您好，已发顺丰，一般 1～2 天送达。', NULL, DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 10 HOUR));

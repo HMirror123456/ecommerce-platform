@@ -15,3 +15,7 @@ export function sendChatMessage(threadId, payload) {
 export function runChatAction(threadId, actionKey, body) {
   return client.post(`/chat/threads/${threadId}/actions/${actionKey}`, body || {}).then((r) => r.data);
 }
+
+export function closeChatThread(threadId) {
+  return client.post(`/chat/threads/${threadId}/close`).then((r) => r.data);
+}
