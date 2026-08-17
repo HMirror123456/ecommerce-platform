@@ -543,16 +543,24 @@ async function approveAfterSale(item, { auditReason = null } = {}) {
   return finalizeApprovedAfterSale(item, { auditReason });
 }
 
-/** 领域规则：售后拒绝关闭 → 若无其它进行中售后，订单退出 REFUNDING（可指定恢复目标） */
-async function closeRejectedAfterSale(item, reason, { restoreStatus = 'SHIPPED' } = {}) {
+/** 领域规则：售后拒绝后保留商家协商会话；若无其它进行中售后，订单退出 REFUNDING（可指定恢复目标） */
+async function rejectAfterSale(item, reason, { restoreStatus = 'SHIPPED' } = {}) {
   const updated = await afterSaleRepo.updateAudit(item.afterSaleId, {
     status: 'REJECTED',
     auditReason: reason?.trim() || null,
     auditedAt: new Date(),
   });
-  await closeAfterSaleChatThreads(item.afterSaleId, {
-    notice: '售后已拒绝，本轮会话已关闭。如需继续协商可重新联系商家，或申请平台介入。',
-  });
+  const merchantThread = await chatRepo.findOpenThreadByAfterSale(item.afterSaleId, 'USER_MERCHANT');
+  if (merchantThread) {
+    await chatRepo.createMessage({
+      threadId: merchantThread.id,
+      senderType: 'SYSTEM',
+      senderId: null,
+      msgType: 'TEXT',
+      content: '商家已拒绝该售后申请，用户可继续沟通，或申请平台介入。',
+      payload: null,
+    });
+  }
   const order = await orderRepo.findById(item.orderId);
   const stillOpen = await orderHasInProgressAfterSale(item.orderId, item.afterSaleId);
   const target = restoreStatus === 'COMPLETED' ? 'COMPLETED' : 'SHIPPED';
@@ -1761,7 +1769,7 @@ export async function auditMerchantAfterSale(merchantId, afterSaleId, { approved
       auditReason: reason?.trim() || '商家同意售后',
     });
   }
-  return closeRejectedAfterSale(item, reason);
+  return rejectAfterSale(item, reason);
 }
 
 /** 领域规则：ESCALATED → 同意/拒绝；REFUND_ONLY 直接退款，RETURN_REFUND 停在 APPROVED */
@@ -1785,7 +1793,7 @@ export async function arbitrateAfterSale(afterSaleId, { approved, reason } = {})
       auditReason: reason?.trim() || '平台仲裁同意',
     });
   }
-  return closeRejectedAfterSale(item, reason);
+  return rejectAfterSale(item, reason);
 }
 
 export async function getDashboardSummary() {
@@ -1942,9 +1950,6 @@ function buildOrderMerchantCardPayload(order, sub) {
 async function enrichThread(thread, actor = null) {
   if (!thread) return null;
   let base;
-  if (thread.afterSaleId) {
-    const item = await afterSaleRepo.findById(thread.afterSaleId);
-    base = {
   const order = thread.orderId ? await orderRepo.findById(thread.orderId) : null;
   const orderStatus = order ? order.status : null;
 
@@ -1955,7 +1960,7 @@ async function enrichThread(thread, actor = null) {
       const sub = order.subOrders?.find((s) => s.subOrderId === item.subOrderId);
       subOrderStatus = sub ? sub.status : null;
     }
-    return {
+    base = {
       ...thread,
       afterSaleStatus: item ? item.status : null,
       merchantId: thread.merchantId ?? (item ? item.merchantId : null),
@@ -1997,21 +2002,6 @@ function readerOfActor(actor) {
   if (actor?.kind === 'merchant') return 'merchant';
   if (actor?.kind === 'admin') return 'cs';
   return 'user';
-  let shopName = null;
-  let subOrderStatus = null;
-  if (thread.orderId && thread.merchantId && order) {
-    const sub = order.subOrders?.find((s) => s.merchantId === thread.merchantId);
-    shopName = sub?.shopName || null;
-    subOrderStatus = sub ? sub.status : null;
-  }
-  return {
-    ...thread,
-    afterSaleStatus: null,
-    merchantId: thread.merchantId,
-    shopName,
-    orderStatus,
-    subOrderStatus,
-  };
 }
 
 async function assertThreadAccess(actor, thread) {
@@ -2196,7 +2186,7 @@ export async function ensureUserMerchantThread(actor, afterSaleId) {
     senderType: 'SYSTEM',
     senderId: null,
     msgType: 'TEXT',
-    content: `已接入与「${item.shopName || '商家'}」的沟通，请说明售后问题。协商不成可申请平台介入。`,
+    content: `已接入与「${item.shopName || '商家'}」的沟通，请说明售后问题。协商不成时用户可按规则申请平台介入。`,
     payload: null,
   });
   await chatRepo.createMessage({
@@ -2352,7 +2342,7 @@ export async function getAfterSaleChatThread(actor, afterSaleId, type) {
   const open = await chatRepo.findOpenThreadByAfterSale(afterSaleId, type);
   const thread = open || (await chatRepo.findLatestThreadByAfterSale(afterSaleId, type));
   if (!thread) return { error: 'NOT_FOUND', message: '暂无沟通记录' };
-  return { thread: await enrichThread(thread) };
+  return { thread: await enrichThread(thread, actor) };
 }
 
 /** 参与方主动关闭会话（用户 / 商家 / 客服） */
@@ -2386,18 +2376,6 @@ export async function postChatMessage(actor, threadId, body = {}) {
   if (denied) return denied;
   if (thread.status !== 'OPEN') return { error: 'INVALID', message: '会话已关闭' };
 
-  // 领域规则：售后进入平台仲裁或已退款后，商家会话仅可查看历史（用户与商家均不可再发）
-  if (thread.type === 'USER_MERCHANT' && thread.afterSaleId) {
-    const afterSale = await afterSaleRepo.findById(thread.afterSaleId);
-    if (!afterSale) return { error: 'NOT_FOUND', message: '关联售后不存在' };
-    if (['ESCALATED', 'REFUNDED'].includes(afterSale.status)) {
-      return {
-        error: 'FORBIDDEN',
-        message:
-          afterSale.status === 'ESCALATED'
-            ? '售后已进入平台仲裁，请通过平台客服沟通'
-            : '售后已结束，仅可查看历史沟通',
-      };
   if (thread.afterSaleId) {
     const afterSale = await afterSaleRepo.findById(thread.afterSaleId);
     if (!afterSale) return { error: 'NOT_FOUND', message: '关联售后不存在' };
@@ -2431,19 +2409,6 @@ export async function postChatMessage(actor, threadId, body = {}) {
     if (!order || !sub) return { error: 'NOT_FOUND', message: '关联订单不存在' };
     payload = payload || buildOrderMerchantCardPayload(order, sub);
     content = content || '订单卡片';
-  }
-
-  let senderType = 'USER';
-  let senderId = null;
-  if (actor.kind === 'admin') {
-    senderType = 'CS_AGENT';
-    senderId = actor.admin.id;
-  } else if (actor.kind === 'merchant') {
-    senderType = 'MERCHANT';
-    senderId = actor.merchant.id;
-  } else {
-    senderType = 'USER';
-    senderId = actor.user.id;
   }
 
   const senderType = actor.kind === 'admin' ? 'CS_AGENT' : actor.kind === 'merchant' ? 'MERCHANT' : 'USER';
@@ -2589,9 +2554,9 @@ async function setOrderStatusFromCsChat(admin, thread, body = {}) {
   } else {
     // SHIPPED / COMPLETED：关闭进行中售后并恢复订单
     if (item && AFTER_SALE_IN_PROGRESS.has(item.status)) {
-      const closed = await closeRejectedAfterSale(item, reason, { restoreStatus: target });
-      if (closed.error) return closed;
-      afterSale = closed.afterSale;
+      const rejected = await rejectAfterSale(item, reason, { restoreStatus: target });
+      if (rejected.error) return rejected;
+      afterSale = rejected.afterSale;
     } else {
       await orderRepo.updateOrder(order.orderId, { status: target });
       if (item?.subOrderId) {

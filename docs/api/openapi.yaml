@@ -1730,6 +1730,29 @@ paths:
           description: 售后不存在
         '409':
           description: 售后未升级，不允许新建客服会话
+    get:
+      tags: [chat]
+      summary: 查看售后 USER_CS 历史会话
+      description: 仅返回该售后最近的 USER_CS 会话（包含 CLOSED），不会创建新会话。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 历史会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 无权查看该会话
+        '404':
+          description: 售后不存在或暂无沟通记录
 
   /after-sales/{afterSaleId}/merchant-chat/thread:
     post:
@@ -1767,6 +1790,31 @@ paths:
           description: 售后不存在
         '409':
           description: 当前售后状态不允许新建商家会话
+    get:
+      tags: [chat]
+      summary: 查看售后 USER_MERCHANT 历史会话
+      description: |
+        仅返回该售后最近的 USER_MERCHANT 会话（包含 CLOSED），不会创建新会话。
+        ESCALATED、REFUNDED 或会话已关闭时，应使用本接口查看历史；POST 新建会话会按状态返回 409。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 历史会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '403':
+          description: 无权查看该会话
+        '404':
+          description: 售后不存在或暂无沟通记录
 
   /orders/{orderId}/merchant-chat/thread:
     post:
@@ -1774,23 +1822,11 @@ paths:
       summary: 开聊或获取订单级 USER_MERCHANT 会话（幂等）
       description: |
         用于待发货等履约前沟通（改规格/颜色、催发货等）。
-        请求体传 merchantId 或 subOrderId；同一 orderId+merchantId 至多一条 OPEN。
+        请求体必须传 merchantId 或 subOrderId；同一 orderId+merchantId 至多一条 OPEN 会话。
       security:
         - bearerAuth: []
       parameters:
         - name: orderId
-          description: 非本人售后
-        '404':
-          description: 售后不存在
-
-  /merchant/after-sales/{afterSaleId}/chat/thread:
-    post:
-      tags: [chat]
-      summary: 商家开聊或获取本店售后的 USER_MERCHANT 会话（幂等）
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: afterSaleId
           in: path
           required: true
           schema:
@@ -1806,7 +1842,45 @@ paths:
                   type: integer
                 subOrderId:
                   type: integer
-              description: merchantId 与 subOrderId 至少传一个
+              description: merchantId 或 subOrderId 至少传一个
+      responses:
+        '200':
+          description: 已有会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '201':
+          description: 新建会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '400':
+          description: merchantId 和 subOrderId 无效或缺失
+        '403':
+          description: 非本人订单
+        '404':
+          description: 订单、子订单或目标商家不存在
+        '409':
+          description: 当前订单状态不允许联系商家
+
+  /merchant/after-sales/{afterSaleId}/chat/thread:
+    post:
+      tags: [chat]
+      summary: 商家开聊或获取本店售后的 USER_MERCHANT 会话（幂等）
+      description: |
+        商家身份取自 Bearer Token，afterSaleId 取自路径参数，不需要请求体。
+        当前售后状态不允许新建时返回 409；查看 CLOSED 历史会话请使用
+        GET /after-sales/{afterSaleId}/merchant-chat/thread。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: afterSaleId
+          in: path
+          required: true
+          schema:
+            type: integer
       responses:
         '200':
           description: 已有会话
@@ -1821,14 +1895,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChatThread'
         '403':
-          description: 非本人订单或非目标店铺
-        '404':
-          description: 订单/子单不存在
-        '409':
-          description: 当前订单状态不允许联系商家
           description: 非本店售后
         '404':
           description: 售后不存在
+        '409':
+          description: 当前售后状态不允许新建商家会话
 
   /chat/threads:
     get:
@@ -1838,7 +1909,6 @@ paths:
         用户：本人会话（可按 type 过滤）；
         商家：本店 USER_MERCHANT；
         CS_AGENT/SUPER_ADMIN：USER_CS 全部。
-      description: 用户仅见自己的 USER_CS；商家仅见本店 USER_MERCHANT；CS_AGENT/SUPER_ADMIN 仅见全部 USER_CS
       security:
         - bearerAuth: []
       parameters:
@@ -1943,7 +2013,7 @@ paths:
       summary: 主动关闭会话
       description: |
         用户/商家/客服关闭本人有权访问的 OPEN 会话。
-        另：售后进入 REFUNDED/REJECTED 时系统自动关闭关联会话；
+        另：售后进入 REFUNDED 时系统自动关闭关联会话；REJECTED 保留 USER_MERCHANT 会话供双方继续沟通或申请平台介入；
         平台仲裁同意退货（APPROVED）时关闭 USER_CS；
         订单取消或整单退款时关闭订单级商家会话。
       security:
@@ -2066,6 +2136,10 @@ components:
           type: string
           nullable: true
           description: 关联子单状态（有 subOrderId 时）
+        unreadCount:
+          type: integer
+          minimum: 0
+          description: 当前登录角色视角下的未读消息数量
         createdAt:
           type: string
           format: date-time
@@ -2083,7 +2157,6 @@ components:
         senderType:
           type: string
           enum: [USER, CS_AGENT, MERCHANT, SYSTEM]
-          enum: [USER, MERCHANT, CS_AGENT, SYSTEM]
         senderId:
           type: integer
           nullable: true

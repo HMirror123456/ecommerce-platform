@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   batchOffShelfMerchantProducts,
   batchSubmitMerchantProductAudit,
@@ -11,6 +11,7 @@ import {
   submitMerchantProductAudit,
   updateMerchantSkuStock,
 } from '@/api/merchant';
+import { getProductInventoryWarning, getSkuAvailable } from '@/utils/inventoryWarning';
 
 const PRODUCT_STATUS_OPTIONS = [
   { label: '草稿', value: 'DRAFT', type: 'info' },
@@ -32,34 +33,18 @@ const batchOffShelfLoading = ref(false);
 const submittingSpuId = ref(null);
 const offShelvingSpuId = ref(null);
 const stockDialogVisible = ref(false);
-const stockFormRef = ref(null);
 const stockSubmitting = ref(false);
-const stockTarget = ref(null);
-const stockForm = ref({ available: 0 });
-const stockRules = {
-  available: [
-    {
-      validator: (_rule, value, callback) => {
-        if (value == null || value === '') {
-          callback(new Error('请输入可用库存'));
-          return;
-        }
-        if (!Number.isInteger(Number(value)) || Number(value) < 0) {
-          callback(new Error('可用库存必须是不小于 0 的整数'));
-          return;
-        }
-        callback();
-      },
-      trigger: 'change',
-    },
-  ],
-};
+const stockProduct = ref(null);
+const stockDrafts = ref({});
 const keyword = ref('');
-const categoryFilter = ref('');
+const parentCategoryId = ref('');
+const childCategoryId = ref('');
 const statusFilter = ref('');
+const stockAlertFilter = ref('');
 const categoryLoading = ref(false);
 const categoryOptions = ref([]);
 const router = useRouter();
+const route = useRoute();
 
 const statusMap = PRODUCT_STATUS_OPTIONS.reduce((map, item) => {
   map[item.value] = item;
@@ -69,6 +54,10 @@ const statusMap = PRODUCT_STATUS_OPTIONS.reduce((map, item) => {
 const selectedSpuIds = computed(() => selectedRows.value.map((row) => row.spuId).filter(Boolean));
 const selectedSubmitCount = computed(() => selectedRows.value.filter((row) => canSubmitAudit(row.status)).length);
 const selectedOffShelfCount = computed(() => selectedRows.value.filter((row) => canOffShelf(row.status)).length);
+const visibleProducts = computed(() => products.value.filter((row) => matchesStockAlertFilter(row)));
+const childCategoryOptions = computed(() => (
+  categoryOptions.value.find((item) => Number(item.id) === Number(parentCategoryId.value))?.children || []
+));
 
 const imageErrorMap = ref({});
 
@@ -107,12 +96,22 @@ function formatSkuSpec(specJson) {
   return entries.map(([key, value]) => `${SKU_SPEC_LABELS[key] || key}：${value}`).join(' / ');
 }
 
-function getSkuAvailable(sku) {
-  return Number(sku?.stock?.available || 0);
-}
-
 function getSkuLocked(sku) {
   return Number(sku?.stock?.locked || 0);
+}
+
+function getStockAlert(row) {
+  const warning = getProductInventoryWarning(row);
+  if (warning.level === 'OUT_OF_STOCK') return { label: warning.label, type: 'danger' };
+  if (warning.level === 'LOW_STOCK') return { label: warning.label, type: 'warning' };
+  return null;
+}
+
+function matchesStockAlertFilter(row) {
+  const warning = getProductInventoryWarning(row);
+  if (stockAlertFilter.value === 'LOW_STOCK') return warning.level === 'LOW_STOCK';
+  if (stockAlertFilter.value === 'OUT_OF_STOCK') return warning.level === 'OUT_OF_STOCK';
+  return true;
 }
 
 function getCategoryLabel(row) {
@@ -131,20 +130,10 @@ function markImageError(row) {
   };
 }
 
-function flattenCategoryOptions(nodes, prefix = '') {
-  return (nodes || []).flatMap((node) => {
-    const label = prefix ? `${prefix} / ${node.name}` : node.name;
-    return [
-      { value: node.id, label },
-      ...flattenCategoryOptions(node.children || [], label),
-    ];
-  });
-}
-
 async function loadCategoryOptions() {
   categoryLoading.value = true;
   try {
-    categoryOptions.value = flattenCategoryOptions(await fetchCategories());
+    categoryOptions.value = await fetchCategories();
   } catch (e) {
     categoryOptions.value = [];
     ElMessage.error(e.message || '加载商品分类失败');
@@ -153,17 +142,46 @@ async function loadCategoryOptions() {
   }
 }
 
+function getProductQueryParams() {
+  return {
+    keyword: keyword.value.trim() || undefined,
+    status: statusFilter.value || undefined,
+    categoryId: childCategoryId.value || parentCategoryId.value || undefined,
+  };
+}
+
+async function fetchAllProducts(params) {
+  const rows = [];
+  let currentPage = 1;
+  let totalRows = 0;
+  do {
+    const data = await fetchMerchantProducts({ ...params, page: currentPage, pageSize: 100 });
+    const pageRows = Array.isArray(data?.items) ? data.items : Array.isArray(data?.list) ? data.list : [];
+    rows.push(...pageRows);
+    totalRows = Number(data?.total) || rows.length;
+    currentPage += 1;
+    if (!pageRows.length) break;
+  } while (rows.length < totalRows);
+  return rows;
+}
+
 async function loadProducts() {
   loading.value = true;
   try {
-    const params = {
-      page: page.value,
-      pageSize: pageSize.value,
-      keyword: keyword.value.trim() || undefined,
-      status: statusFilter.value || undefined,
-      categoryId: categoryFilter.value || undefined,
-    };
-    const data = await fetchMerchantProducts(params);
+    const params = getProductQueryParams();
+    if (stockAlertFilter.value) {
+      const filtered = (await fetchAllProducts(params)).filter((row) => matchesStockAlertFilter(row));
+      total.value = filtered.length;
+      const lastPage = Math.max(1, Math.ceil(total.value / pageSize.value));
+      if (page.value > lastPage) page.value = lastPage;
+      const start = (page.value - 1) * pageSize.value;
+      products.value = filtered.slice(start, start + pageSize.value);
+      tableRef.value?.clearSelection?.();
+      selectedRows.value = [];
+      return;
+    }
+
+    const data = await fetchMerchantProducts({ ...params, page: page.value, pageSize: pageSize.value });
     const rows = Array.isArray(data?.items) ? data.items : Array.isArray(data?.list) ? data.list : [];
     const nextTotal = Number(data?.total) || 0;
     if (!rows.length && nextTotal > 0 && page.value > 1) {
@@ -187,14 +205,28 @@ async function loadProducts() {
 
 function resetFilters() {
   keyword.value = '';
-  categoryFilter.value = '';
+  parentCategoryId.value = '';
+  childCategoryId.value = '';
   statusFilter.value = '';
+  stockAlertFilter.value = '';
   page.value = 1;
   loadProducts();
 }
 
 function handleFilterChange() {
   page.value = 1;
+  loadProducts();
+}
+
+function handleParentCategoryChange() {
+  childCategoryId.value = '';
+  handleFilterChange();
+}
+
+function handleStockAlertFilterChange() {
+  page.value = 1;
+  tableRef.value?.clearSelection?.();
+  selectedRows.value = [];
   loadProducts();
 }
 
@@ -240,45 +272,47 @@ function editProduct(row) {
   router.push({ name: 'product-edit', params: { spuId: row.spuId } });
 }
 
-function openStockDialog(row, sku) {
-  if (!sku?.skuId) return;
-  stockTarget.value = {
-    productTitle: row?.title || '-',
-    skuId: sku.skuId,
-    specText: formatSkuSpec(sku.specJson),
-    locked: getSkuLocked(sku),
-  };
-  stockForm.value = { available: getSkuAvailable(sku) };
+function openProductStockDialog(row) {
+  if (!getSkus(row).length) {
+    ElMessage.warning('当前商品没有可调整的 SKU');
+    return;
+  }
+  stockProduct.value = row;
+  stockDrafts.value = Object.fromEntries(getSkus(row).map((sku) => [sku.skuId, getSkuAvailable(sku)]));
   stockDialogVisible.value = true;
 }
 
 function resetStockDialog() {
-  stockTarget.value = null;
-  stockForm.value = { available: 0 };
-  stockFormRef.value?.clearValidate();
+  stockProduct.value = null;
+  stockDrafts.value = {};
 }
 
-function applyStockUpdate(skuId, stock) {
-  products.value = products.value.map((product) => ({
-    ...product,
-    skus: getSkus(product).map((sku) => (
-      Number(sku.skuId) === Number(skuId)
-        ? { ...sku, stock: { ...sku.stock, ...stock } }
-        : sku
-    )),
+async function submitStockUpdates() {
+  if (!stockProduct.value || stockSubmitting.value) return;
+  const updates = getSkus(stockProduct.value).map((sku) => ({
+    skuId: sku.skuId,
+    available: stockDrafts.value[sku.skuId],
+    originalAvailable: getSkuAvailable(sku),
   }));
-}
-
-async function submitStockUpdate() {
-  if (!stockTarget.value?.skuId || stockSubmitting.value) return;
-  const valid = await stockFormRef.value?.validate().catch(() => false);
-  if (!valid) return;
-  const available = Number(stockForm.value.available);
+  if (updates.some((item) => item.available == null || item.available === '' || !Number.isInteger(Number(item.available)) || Number(item.available) < 0)) {
+    ElMessage.warning('每个 SKU 的可用库存都必须是不小于 0 的整数');
+    return;
+  }
+  const changed = updates.filter((item) => Number(item.available) !== item.originalAvailable);
+  if (!changed.length) {
+    ElMessage.info('库存未发生变化');
+    return;
+  }
 
   stockSubmitting.value = true;
   try {
-    const data = await updateMerchantSkuStock(stockTarget.value.skuId, { available });
-    applyStockUpdate(data.skuId, data.stock);
+    for (const item of changed) {
+      await updateMerchantSkuStock(item.skuId, { available: Number(item.available) });
+    }
+    await loadProducts();
+    const updatedProduct = products.value.find((product) => Number(product.spuId) === Number(stockProduct.value?.spuId));
+    if (updatedProduct) stockProduct.value = updatedProduct;
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('merchant-inventory-changed'));
     ElMessage.success('库存已更新');
     stockDialogVisible.value = false;
   } catch (e) {
@@ -418,12 +452,16 @@ async function confirmBatchOffShelf() {
 
 onMounted(async () => {
   await loadCategoryOptions();
+  parentCategoryId.value = route.query.parentCategoryId || '';
+  childCategoryId.value = route.query.categoryId || '';
+  statusFilter.value = route.query.status || '';
+  stockAlertFilter.value = route.query.stockAlert || '';
   await loadProducts();
 });
 </script>
 
 <template>
-  <el-card shadow="never">
+  <el-card shadow="never" class="product-page">
     <template #header>
       <div class="card-header">
         <div>
@@ -444,21 +482,31 @@ onMounted(async () => {
         @clear="handleFilterChange"
       />
       <el-select
-        v-model="categoryFilter"
+        v-model="parentCategoryId"
         clearable
-        filterable
         :loading="categoryLoading"
-        placeholder="商品分类"
+        placeholder="商品大类"
+        class="category-filter"
+        @change="handleParentCategoryChange"
+        @clear="handleParentCategoryChange"
+      >
+        <el-option
+          v-for="item in categoryOptions"
+          :key="item.id"
+          :label="item.name"
+          :value="item.id"
+        />
+      </el-select>
+      <el-select
+        v-model="childCategoryId"
+        clearable
+        :disabled="!parentCategoryId"
+        placeholder="商品子类"
         class="category-filter"
         @change="handleFilterChange"
         @clear="handleFilterChange"
       >
-        <el-option
-          v-for="item in categoryOptions"
-          :key="item.value"
-          :label="item.label"
-          :value="item.value"
-        />
+        <el-option v-for="item in childCategoryOptions" :key="item.id" :label="item.name" :value="item.id" />
       </el-select>
       <el-select
         v-model="statusFilter"
@@ -475,6 +523,18 @@ onMounted(async () => {
           :label="item.label"
           :value="item.value"
         />
+      </el-select>
+      <el-select
+        v-model="stockAlertFilter"
+        clearable
+        placeholder="库存预警"
+        class="stock-alert-filter"
+        @change="handleStockAlertFilterChange"
+        @clear="handleStockAlertFilterChange"
+      >
+        <el-option label="全部库存" value="" />
+        <el-option label="低库存（小于 10）" value="LOW_STOCK" />
+        <el-option label="缺货" value="OUT_OF_STOCK" />
       </el-select>
       <el-button type="primary" :loading="loading" @click="handleFilterChange">搜索</el-button>
       <el-button @click="resetFilters">重置</el-button>
@@ -503,7 +563,7 @@ onMounted(async () => {
     <el-table
       ref="tableRef"
       v-loading="loading"
-      :data="products"
+      :data="visibleProducts"
       stripe
       @selection-change="handleSelectionChange"
     >
@@ -533,6 +593,14 @@ onMounted(async () => {
           <el-tag :type="getStatusTagType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="库存预警" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="getStockAlert(row)" :type="getStockAlert(row).type">
+            {{ getStockAlert(row).label }}
+          </el-tag>
+          <span v-else class="muted">{{ getProductInventoryWarning(row).label }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="驳回原因" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.status === 'REJECTED' && getRejectReason(row)" class="reject-reason">
@@ -556,14 +624,6 @@ onMounted(async () => {
                 <span>可用 {{ getSkuAvailable(sku) }}</span>
                 <span class="muted">锁定 {{ getSkuLocked(sku) }}</span>
               </div>
-              <el-button
-                link
-                type="primary"
-                :disabled="stockSubmitting"
-                @click="openStockDialog(row, sku)"
-              >
-                调整
-              </el-button>
             </div>
           </div>
           <span v-else class="muted">-</span>
@@ -572,43 +632,42 @@ onMounted(async () => {
       <el-table-column label="提交审核时间" width="180">
         <template #default="{ row }">{{ formatTime(row.submittedAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
-          <el-button
-            v-if="canEdit(row.status)"
-            link
-            type="primary"
-            @click="editProduct(row)"
-          >
-            编辑
-          </el-button>
-          <el-button
-            v-if="canSubmitAudit(row.status)"
-            link
-            type="primary"
-            :loading="submittingSpuId === row.spuId"
-            @click="confirmSubmitAudit(row)"
-          >
-            {{ getSubmitAuditLabel(row.status) }}
-          </el-button>
-          <el-button
-            v-if="canOffShelf(row.status)"
-            link
-            type="warning"
-            :loading="offShelvingSpuId === row.spuId"
-            @click="confirmOffShelf(row)"
-          >
-            下架
-          </el-button>
-          <span v-if="!canEdit(row.status) && !canSubmitAudit(row.status) && !canOffShelf(row.status)" class="muted">
-            {{ getProductReadonlyActionText(row.status) }}
-          </span>
+          <div class="product-actions">
+            <span v-if="row.status === 'PENDING_AUDIT'" class="muted">待平台审核</span>
+            <template v-else>
+              <el-button v-if="canEdit(row.status)" link type="primary" @click="editProduct(row)">编辑</el-button>
+              <el-button
+                v-if="getSkus(row).length"
+                link
+                type="primary"
+                :disabled="stockSubmitting"
+                @click="openProductStockDialog(row)"
+              >调整库存</el-button>
+              <el-button
+                v-if="canSubmitAudit(row.status)"
+                link
+                type="primary"
+                :loading="submittingSpuId === row.spuId"
+                @click="confirmSubmitAudit(row)"
+              >{{ getSubmitAuditLabel(row.status) }}</el-button>
+              <el-button
+                v-if="canOffShelf(row.status)"
+                link
+                type="warning"
+                :loading="offShelvingSpuId === row.spuId"
+                @click="confirmOffShelf(row)"
+              >下架</el-button>
+              <span v-if="!canEdit(row.status) && !canSubmitAudit(row.status) && !canOffShelf(row.status) && !getSkus(row).length" class="muted">-</span>
+            </template>
+          </div>
         </template>
       </el-table-column>
     </el-table>
 
     <div class="pagination-bar">
-      <div class="summary">当前页 {{ products.length }} 个，共 {{ total }} 个商品</div>
+      <div class="summary">当前页 {{ visibleProducts.length }} 个，共 {{ total }} 个商品</div>
       <el-pagination
         :current-page="page"
         :page-size="pageSize"
@@ -623,31 +682,39 @@ onMounted(async () => {
 
   <el-dialog
     v-model="stockDialogVisible"
-    title="调整 SKU 可用库存"
-    width="420px"
+    :title="`调整库存：${stockProduct?.title || '-'}`"
+    width="760px"
+    class="stock-dialog"
     @closed="resetStockDialog"
   >
-    <el-descriptions :column="1" border class="stock-dialog-info">
-      <el-descriptions-item label="商品">{{ stockTarget?.productTitle || '-' }}</el-descriptions-item>
-      <el-descriptions-item label="SKU">{{ stockTarget?.skuId || '-' }}</el-descriptions-item>
-      <el-descriptions-item label="规格">{{ stockTarget?.specText || '-' }}</el-descriptions-item>
-      <el-descriptions-item label="锁定库存">{{ stockTarget?.locked ?? '-' }}</el-descriptions-item>
-    </el-descriptions>
-    <el-form ref="stockFormRef" :model="stockForm" :rules="stockRules" label-position="top">
-      <el-form-item label="可用库存" prop="available">
-        <el-input-number
-          v-model="stockForm.available"
-          :min="0"
-          :precision="0"
-          :disabled="stockSubmitting"
-          controls-position="right"
-          class="full-width"
-        />
-      </el-form-item>
-    </el-form>
+    <el-table :data="getSkus(stockProduct)" border>
+      <el-table-column label="SKU" min-width="220">
+        <template #default="{ row }">
+          <div>{{ formatSkuSpec(row.specJson) }}</div>
+          <div class="sku-id">SKU ID：{{ row.skuId }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="可用库存" width="120">
+        <template #default="{ row }">{{ getSkuAvailable(row) }}</template>
+      </el-table-column>
+      <el-table-column label="锁定库存" width="120">
+        <template #default="{ row }">{{ getSkuLocked(row) }}</template>
+      </el-table-column>
+      <el-table-column label="新的可用库存" width="180">
+        <template #default="{ row }">
+          <el-input-number
+            v-model="stockDrafts[row.skuId]"
+            :min="0"
+            :precision="0"
+            :disabled="stockSubmitting"
+            controls-position="right"
+          />
+        </template>
+      </el-table-column>
+    </el-table>
     <template #footer>
       <el-button :disabled="stockSubmitting" @click="stockDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="stockSubmitting" @click="submitStockUpdate">保存</el-button>
+      <el-button type="primary" :loading="stockSubmitting" @click="submitStockUpdates">保存库存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -660,20 +727,21 @@ onMounted(async () => {
   gap: 16px;
 }
 .title {
-  color: #333;
-  font-weight: 600;
-  line-height: 24px;
+  color: #1f2937;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 26px;
 }
 .description {
   margin-top: 4px;
-  color: #999;
+  color: #94a3b8;
   font-size: 13px;
 }
 .filter-bar {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px 12px;
   flex-wrap: wrap;
 }
 .keyword-input {
@@ -685,45 +753,55 @@ onMounted(async () => {
 .status-filter {
   width: 160px;
 }
+.stock-alert-filter {
+  width: 170px;
+}
 .batch-bar {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fafbfd;
 }
 .product-thumb {
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
   object-fit: cover;
   border: 1px solid #e8e8e8;
-  border-radius: 4px;
+  border-radius: 6px;
   background: #f7f8fa;
   color: #999;
   font-size: 12px;
   line-height: 16px;
   text-align: center;
 }
-.stock-list { display: flex; flex-direction: column; gap: 8px; }
+.stock-list { display: flex; flex-direction: column; gap: 8px; max-width: 340px; }
 .stock-line {
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) minmax(86px, auto) auto;
+  grid-template-columns: minmax(100px, 1fr) minmax(86px, auto);
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  padding-bottom: 7px;
+  border-bottom: 1px dashed #edf0f5;
 }
+.stock-line:last-child { padding-bottom: 0; border-bottom: 0; }
 .stock-main,
 .stock-values { display: flex; flex-direction: column; gap: 3px; line-height: 1.4; }
 .stock-spec { color: #333; }
 .sku-id { color: #999; font-size: 12px; }
-.stock-dialog-info { margin-bottom: 16px; }
-.full-width { width: 100%; }
 .muted { color: #999; }
 .reject-reason { color: #f56c6c; }
+.product-actions { display: flex; align-items: center; gap: 4px; min-height: 28px; white-space: nowrap; }
 .pagination-bar {
-  margin-top: 16px;
+  margin-top: 18px;
+  padding-top: 2px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -731,6 +809,12 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 .summary {
-  color: #666;
+  color: #64748b;
+}
+.stock-dialog :deep(.el-dialog__body) { padding-top: 8px; }
+.stock-dialog :deep(.el-input-number) { width: 140px; }
+@media (max-width: 900px) {
+  .keyword-input { width: min(100%, 360px); }
+  .category-filter, .status-filter, .stock-alert-filter { width: 160px; }
 }
 </style>

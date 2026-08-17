@@ -1,7 +1,10 @@
 :root {
-  --sidebar-bg: #001529;
-  --content-bg: #f0f2f5;
-  --color-primary: #e4393c;
+  --sidebar-bg: #0f1d36;
+  --content-bg: #f5f7fb;
+  --color-primary: #1677ff;
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+  --border-color: #e7ebf1;
 }
 * { box-sizing: border-box; }
 html, body, #app {
@@ -9,5 +12,52 @@ html, body, #app {
   height: 100%;
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary);
+}
+
+body {
+  background: var(--content-bg);
+}
+
+.el-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(15, 29, 54, .035);
+}
+
+.el-card__header {
+  padding: 16px 20px;
+  border-bottom-color: #edf0f5;
+}
+
+.el-card__body {
+  padding: 20px;
+}
+
+.el-table {
+  --el-table-border-color: #edf0f5;
+  --el-table-header-bg-color: #f7f9fc;
+  --el-table-row-hover-bg-color: #f6f9ff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.el-table th.el-table__cell {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.el-table td.el-table__cell,
+.el-table th.el-table__cell {
+  padding: 12px 0;
+}
+
+.el-tag {
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.el-empty {
+  padding: 28px 0;
 }

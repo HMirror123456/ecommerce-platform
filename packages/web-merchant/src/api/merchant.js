@@ -80,8 +80,22 @@ export function openMerchantAfterSaleChat(afterSaleId) {
   return client.post(`/merchant/after-sales/${afterSaleId}/chat/thread`).then((r) => r.data);
 }
 
+export function getMerchantAfterSaleChatThread(afterSaleId) {
+  return client.get(`/after-sales/${afterSaleId}/merchant-chat/thread`).then((r) => r.data);
+}
+
 export function fetchMerchantChatThreads(params) {
   return client.get('/chat/threads', { params: { type: 'USER_MERCHANT', ...params } }).then((r) => r.data);
+}
+
+export function fetchMerchantChatUnreadCount() {
+  return client.get('/chat/unread-count').then((r) => r.data);
+}
+
+export function notifyMerchantChatUnreadChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('merchant-chat-unread-changed'));
+  }
 }
 
 export function fetchMerchantChatMessages(threadId, params) {

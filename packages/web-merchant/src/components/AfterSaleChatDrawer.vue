@@ -7,6 +7,7 @@ import {
   openMerchantAfterSaleChat,
   sendMerchantChatMessage,
 } from '@/api/merchant';
+import { getAfterSaleCommunicationMode } from '@/utils/afterSaleCommunication';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -14,7 +15,7 @@ const props = defineProps({
   /** 订单级等无售后会话：直接传入列表中的 thread */
   initialThread: { type: Object, default: null },
 });
-const emit = defineEmits(['update:modelValue', 'closed']);
+const emit = defineEmits(['update:modelValue', 'closed', 'read']);
 
 const loading = ref(false);
 const thread = ref(null);
@@ -24,15 +25,6 @@ const sending = ref(false);
 const closing = ref(false);
 let pollTimer = null;
 
-const STATUS_LABELS = {
-  APPLIED: '待商家处理',
-  APPROVED: '等待用户寄回',
-  RETURNING: '用户已寄回，待商家验收',
-  REFUNDED: '退款已完成',
-  REJECTED: '售后已拒绝',
-  ESCALATED: '平台仲裁中',
-};
-
 const TYPE_LABELS = {
   REFUND_ONLY: '仅退款',
   RETURN_REFUND: '退货退款',
@@ -40,7 +32,13 @@ const TYPE_LABELS = {
 
 const isOrderThread = computed(() => Boolean(thread.value && !thread.value.afterSaleId));
 
-const drawerTitle = computed(() => (isOrderThread.value ? '订单沟通' : '回复用户'));
+const drawerTitle = computed(() => {
+  const currentThread = thread.value || props.initialThread;
+  if (!currentThread) return '回复用户';
+  if (!currentThread.afterSaleId) return currentThread.status === 'CLOSED' ? '查看会话' : '订单沟通';
+  const mode = getAfterSaleCommunicationMode(currentThread.afterSaleStatus);
+  return currentThread.status !== 'OPEN' || mode.isReadOnly ? '查看沟通' : '回复用户';
+});
 
 function formatTime(iso) {
   if (!iso) return '';
@@ -58,7 +56,7 @@ function isMine(message) {
 }
 
 function statusLabel(status) {
-  return STATUS_LABELS[status] || status || '-';
+  return getAfterSaleCommunicationMode(status).displayText;
 }
 
 function typeLabel(type) {
@@ -69,24 +67,20 @@ const threadOpen = computed(() => thread.value?.status === 'OPEN');
 
 function isReadOnlyThread() {
   if (!threadOpen.value) return true;
-  return ['REFUNDED', 'ESCALATED'].includes(thread.value?.afterSaleStatus);
+  return getAfterSaleCommunicationMode(thread.value?.afterSaleStatus).isReadOnly;
 }
 
 function readOnlyHint() {
   if (!threadOpen.value) return '会话已关闭，无法继续发送';
-  if (thread.value?.afterSaleStatus === 'ESCALATED') {
-    return '该售后已进入平台仲裁，商家仅可查看历史沟通';
-  }
-  if (thread.value?.afterSaleStatus === 'REFUNDED') {
-    return '售后已完成，仅查看沟通记录';
-  }
+  const communicationMode = getAfterSaleCommunicationMode(thread.value?.afterSaleStatus);
+  if (communicationMode.isReadOnly) return `${communicationMode.displayText}，商家仅可查看历史沟通`;
   return '';
 }
 
 function metaLine() {
   if (!thread.value) return '';
   if (thread.value.afterSaleId) {
-    return `订单 ${thread.value.orderNo} · 售后 #${thread.value.afterSaleId} · ${statusLabel(thread.value.afterSaleStatus)}`;
+    return `售后沟通 · 售后单 #${thread.value.afterSaleId} · ${statusLabel(thread.value.afterSaleStatus)}`;
   }
   return `订单 ${thread.value.orderNo} · 订单沟通`;
 }
@@ -110,16 +104,17 @@ async function loadMessages(reset) {
 async function openThread() {
   loading.value = true;
   try {
-    if (props.afterSaleId) {
-      thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
-    } else if (props.initialThread?.id) {
+    if (props.initialThread?.id) {
       thread.value = props.initialThread;
+    } else if (props.afterSaleId) {
+      thread.value = await openMerchantAfterSaleChat(props.afterSaleId);
     } else {
       ElMessage.warning('缺少会话信息');
       emit('update:modelValue', false);
       return;
     }
     await loadMessages(true);
+    emit('read');
     startPoll();
   } catch (e) {
     ElMessage.error(e.message || '无法打开用户沟通会话');
@@ -195,6 +190,7 @@ onUnmounted(stopPoll);
     :model-value="modelValue"
     :title="drawerTitle"
     size="400px"
+    class="merchant-chat-drawer"
     @close="onClose"
     @update:model-value="emit('update:modelValue', $event)"
   >
@@ -259,26 +255,37 @@ onUnmounted(stopPoll);
 <style scoped>
 .drawer-body { display: flex; flex-direction: column; height: calc(100vh - 120px); }
 .thread-meta {
-  margin-bottom: 8px;
-  color: #999;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  color: #64748b;
   font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fafbfd;
 }
-.msg-list { flex: 1; overflow: auto; padding: 12px; background: #f5f5f5; border-radius: 8px; }
-.bubble-row { display: flex; margin-bottom: 10px; }
+.msg-list { flex: 1; overflow: auto; padding: 14px; background: #f7f9fc; border: 1px solid #edf0f5; border-radius: 10px; }
+.bubble-row { display: flex; margin-bottom: 12px; }
 .bubble-row.mine { justify-content: flex-end; }
 .bubble-row.system { justify-content: center; }
-.bubble { max-width: 85%; padding: 8px 10px; background: #fff; border-radius: 8px; }
-.bubble-row.mine .bubble { background: #e8f3ff; }
-.bubble-row.system .bubble { background: #fff7e6; }
-.who { margin-bottom: 4px; color: #999; font-size: 11px; }
-.text { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
-.card { padding: 8px; border: 1px solid #eee; border-radius: 6px; font-size: 12px; line-height: 1.7; }
-.card-title { margin-bottom: 4px; font-weight: 600; }
-.muted { color: #999; }
-.read-only-hint { color: #909399; font-size: 12px; }
-.composer { display: grid; gap: 8px; margin-top: 12px; }
+.bubble { max-width: 85%; padding: 9px 11px; background: #fff; border: 1px solid #edf0f5; border-radius: 10px; box-shadow: 0 1px 2px rgba(15, 23, 42, .03); }
+.bubble-row.mine .bubble { background: #eaf3ff; border-color: #cfe4ff; }
+.bubble-row.system .bubble { max-width: 92%; background: #fff8eb; border-color: #f8dfaa; }
+.who { margin-bottom: 5px; color: #94a3b8; font-size: 11px; }
+.text { white-space: pre-wrap; color: #334155; font-size: 13px; line-height: 1.6; }
+.card { padding: 9px; border: 1px solid #e8edf5; border-radius: 7px; background: rgba(255,255,255,.72); font-size: 12px; line-height: 1.75; }
+.card-title { margin-bottom: 5px; color: #1f2937; font-weight: 700; }
+.muted { color: #94a3b8; }
+.read-only-hint { padding: 8px 10px; color: #64748b; font-size: 12px; line-height: 18px; border-radius: 6px; background: #f4f6f8; }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 14px; align-items: end; }
+.composer .read-only-hint { grid-column: 1 / -1; }
+.composer :deep(.el-button) { min-width: 72px; height: 32px; }
+.merchant-chat-drawer :deep(.el-drawer__header) { margin-bottom: 16px; color: #1f2937; font-weight: 700; }
+@media (max-width: 520px) {
+  .composer { grid-template-columns: 1fr; }
+  .composer :deep(.el-button) { width: 100%; }
+}
 </style>
