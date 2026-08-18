@@ -62,7 +62,11 @@ function statusTagType(status) {
 function buildParams() {
   const params = { page: page.value, pageSize: pageSize.value };
   if (filters.value.orderNo.trim()) params.orderNo = filters.value.orderNo.trim();
-  if (filters.value.userId !== '') params.userId = filters.value.userId;
+  const userKey = String(filters.value.userId || '').trim();
+  if (userKey) {
+    if (/^\d{11}$/.test(userKey)) params.phone = userKey;
+    else params.userId = userKey;
+  }
   if (filters.value.merchantId !== '') params.merchantId = filters.value.merchantId;
   if (filters.value.status) params.status = filters.value.status;
   return params;
@@ -125,10 +129,10 @@ onMounted(loadList);
 
     <el-form :inline="true" class="filters" @submit.prevent="onSearch">
       <el-form-item label="订单号">
-        <el-input v-model="filters.orderNo" placeholder="模糊匹配" clearable style="width: 160px" />
+        <el-input v-model="filters.orderNo" placeholder="订单号或订单ID" clearable style="width: 180px" />
       </el-form-item>
-      <el-form-item label="用户ID">
-        <el-input v-model="filters.userId" placeholder="userId" clearable style="width: 100px" />
+      <el-form-item label="用户">
+        <el-input v-model="filters.userId" placeholder="用户ID 或手机号" clearable style="width: 160px" />
       </el-form-item>
       <el-form-item label="商家ID">
         <el-input v-model="filters.merchantId" placeholder="merchantId" clearable style="width: 100px" />

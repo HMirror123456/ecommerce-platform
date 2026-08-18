@@ -1564,9 +1564,9 @@ export async function escalateAfterSale(userId, orderId, afterSaleId) {
   return { afterSale: afterSaleRepo.serialize(updated) };
 }
 
-export async function getAdminOrders({ orderNo, userId, merchantId, status, page = 1, pageSize = 20 } = {}) {
+export async function getAdminOrders({ orderNo, userId, merchantId, phone, status, page = 1, pageSize = 20 } = {}) {
   await expirePendingOrders();
-  const { total, list } = await orderRepo.listAdmin({ orderNo, userId, merchantId, status, page, pageSize });
+  const { total, list } = await orderRepo.listAdmin({ orderNo, userId, merchantId, phone, status, page, pageSize });
   return {
     total,
     list: list.map((o) => ({
@@ -1949,10 +1949,11 @@ function buildOrderMerchantCardPayload(order, sub) {
 
 async function enrichThread(thread, actor = null) {
   if (!thread) return null;
-  let base;
+
   const order = thread.orderId ? await orderRepo.findById(thread.orderId) : null;
   const orderStatus = order ? order.status : null;
 
+  let base;
   if (thread.afterSaleId) {
     const item = await afterSaleRepo.findById(thread.afterSaleId);
     let subOrderStatus = null;
@@ -1970,16 +1971,19 @@ async function enrichThread(thread, actor = null) {
     };
   } else {
     let shopName = null;
-    if (thread.orderId && thread.merchantId) {
-      const order = await orderRepo.findById(thread.orderId);
-      const sub = order?.subOrders?.find((s) => s.merchantId === thread.merchantId);
+    let subOrderStatus = null;
+    if (thread.orderId && thread.merchantId && order) {
+      const sub = order.subOrders?.find((s) => s.merchantId === thread.merchantId);
       shopName = sub?.shopName || null;
+      subOrderStatus = sub ? sub.status : null;
     }
     base = {
       ...thread,
       afterSaleStatus: null,
       merchantId: thread.merchantId,
       shopName,
+      orderStatus,
+      subOrderStatus,
     };
   }
 
@@ -1992,8 +1996,7 @@ async function enrichThread(thread, actor = null) {
     base.unreadCount = 0;
     return base;
   }
-  const reader =
-    actor.kind === 'merchant' ? 'merchant' : actor.kind === 'admin' ? 'cs' : 'user';
+  const reader = readerOfActor(actor);
   base.unreadCount = await chatRepo.countUnreadForReader(thread, reader);
   return base;
 }
@@ -2303,7 +2306,6 @@ export async function getChatUnreadCount(actor) {
   const list = await listChatThreads(actor, { status: 'OPEN' });
   const unreadCount = list.reduce((sum, t) => sum + (Number(t.unreadCount) || 0), 0);
   return { unreadCount };
-  return Promise.all(list.map(enrichThread));
 }
 
 export async function getChatMessages(actor, threadId, { afterId } = {}) {
@@ -2376,15 +2378,18 @@ export async function postChatMessage(actor, threadId, body = {}) {
   if (denied) return denied;
   if (thread.status !== 'OPEN') return { error: 'INVALID', message: '会话已关闭' };
 
-  if (thread.afterSaleId) {
+  // 领域规则：售后进入平台仲裁或已退款后，商家会话仅可查看历史（用户与商家均不可再发）
+  if (thread.type === 'USER_MERCHANT' && thread.afterSaleId) {
     const afterSale = await afterSaleRepo.findById(thread.afterSaleId);
     if (!afterSale) return { error: 'NOT_FOUND', message: '关联售后不存在' };
-    if (
-      actor.kind === 'merchant'
-      && thread.type === 'USER_MERCHANT'
-      && ['ESCALATED', 'REFUNDED'].includes(afterSale.status)
-    ) {
-      return { error: 'FORBIDDEN', message: '该售后仅可查看历史沟通，商家不能继续发送消息' };
+    if (['ESCALATED', 'REFUNDED'].includes(afterSale.status)) {
+      return {
+        error: 'FORBIDDEN',
+        message:
+          afterSale.status === 'ESCALATED'
+            ? '售后已进入平台仲裁，请通过平台客服沟通'
+            : '售后已结束，仅可查看历史沟通',
+      };
     }
   }
 
@@ -2411,13 +2416,19 @@ export async function postChatMessage(actor, threadId, body = {}) {
     content = content || '订单卡片';
   }
 
-  const senderType = actor.kind === 'admin' ? 'CS_AGENT' : actor.kind === 'merchant' ? 'MERCHANT' : 'USER';
-  const senderId =
-    actor.kind === 'admin'
-      ? actor.admin.id
-      : actor.kind === 'merchant'
-        ? actor.merchant.id
-        : actor.user.id;
+  let senderType = 'USER';
+  let senderId = null;
+  if (actor.kind === 'admin') {
+    senderType = 'CS_AGENT';
+    senderId = actor.admin.id;
+  } else if (actor.kind === 'merchant') {
+    senderType = 'MERCHANT';
+    senderId = actor.merchant.id;
+  } else {
+    senderType = 'USER';
+    senderId = actor.user.id;
+  }
+
   const message = await chatRepo.createMessage({
     threadId,
     senderType,
