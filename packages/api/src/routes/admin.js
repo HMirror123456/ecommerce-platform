@@ -133,10 +133,10 @@ router.post('/products/:spuId/audit', requireAdmin(['OPERATOR']), async (req, re
 
 router.get('/orders', requireAdmin(adminRoles), async (req, res, next) => {
   try {
-    const { orderNo, userId, merchantId, status } = req.query;
+    const { orderNo, userId, merchantId, phone, status } = req.query;
     const page = Number(req.query.page) || 1;
     const pageSize = Number(req.query.pageSize) || 20;
-    res.json(await getAdminOrders({ orderNo, userId, merchantId, status, page, pageSize }));
+    res.json(await getAdminOrders({ orderNo, userId, merchantId, phone, status, page, pageSize }));
   } catch (err) {
     next(err);
   }

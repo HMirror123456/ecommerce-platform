@@ -177,8 +177,8 @@ export async function listByUser(userId, status) {
   return loadOrdersGraph(rows.map((r) => r.order_id));
 }
 
-export async function listAdmin({ orderNo, userId, merchantId, status, page = 1, pageSize = 20 } = {}) {
-  let sql = 'SELECT DISTINCT o.order_id FROM orders o';
+export async function listAdmin({ orderNo, userId, merchantId, phone, status, page = 1, pageSize = 20 } = {}) {
+  let sql = 'SELECT DISTINCT o.order_id, o.created_at FROM orders o';
   const params = [];
   const where = [];
   if (merchantId != null && merchantId !== '') {
@@ -186,9 +186,21 @@ export async function listAdmin({ orderNo, userId, merchantId, status, page = 1,
     where.push('s.merchant_id = ?');
     params.push(Number(merchantId));
   }
+  const phoneTrimmed = typeof phone === 'string' ? phone.trim() : '';
+  if (phoneTrimmed) {
+    sql += ' JOIN users u ON u.id = o.user_id';
+    where.push('u.phone = ?');
+    params.push(phoneTrimmed);
+  }
   if (orderNo?.trim()) {
-    where.push('o.order_no LIKE ?');
-    params.push(`%${orderNo.trim()}%`);
+    const no = orderNo.trim();
+    if (/^\d+$/.test(no)) {
+      where.push('(o.order_no LIKE ? OR o.order_id = ?)');
+      params.push(`%${no}%`, Number(no));
+    } else {
+      where.push('o.order_no LIKE ?');
+      params.push(`%${no}%`);
+    }
   }
   if (userId != null && userId !== '') {
     where.push('o.user_id = ?');
@@ -201,7 +213,7 @@ export async function listAdmin({ orderNo, userId, merchantId, status, page = 1,
   if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
 
   const [countRows] = await pool.query(
-    sql.replace('SELECT DISTINCT o.order_id', 'SELECT COUNT(DISTINCT o.order_id) AS cnt'),
+    sql.replace('SELECT DISTINCT o.order_id, o.created_at', 'SELECT COUNT(DISTINCT o.order_id) AS cnt'),
     params,
   );
   const total = Number(countRows[0]?.cnt) || 0;

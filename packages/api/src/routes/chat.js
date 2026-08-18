@@ -122,11 +122,11 @@ router.post('/orders/:orderId/merchant-chat/thread', requireUser, async (req, re
   }
 });
 
-/** 商家侧开售后沟通（兼容入口） */
+/** 商家端开聊入口（与 openapi / web-merchant 对齐） */
 router.post('/merchant/after-sales/:afterSaleId/chat/thread', requireMerchant, async (req, res, next) => {
   try {
-    const result = await ensureUserMerchantThreadForMerchant(
-      req.merchant.id,
+    const result = await ensureUserMerchantThread(
+      { kind: 'merchant', merchant: req.merchant },
       Number(req.params.afterSaleId),
     );
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
@@ -142,7 +142,10 @@ router.post('/merchant/after-sales/:afterSaleId/chat/thread', requireMerchant, a
 /** 用户侧兼容入口 */
 router.post('/users/after-sales/:afterSaleId/merchant-chat/thread', requireUser, async (req, res, next) => {
   try {
-    const result = await ensureUserMerchantThreadForUser(req.user.id, Number(req.params.afterSaleId));
+    const result = await ensureUserMerchantThread(
+      { kind: 'user', user: req.user },
+      Number(req.params.afterSaleId),
+    );
     if (result.error === 'NOT_FOUND') return res.status(404).json({ message: result.message });
     if (result.error === 'FORBIDDEN') return res.status(403).json({ message: result.message });
     if (result.error === 'INVALID_STATE') return res.status(409).json({ message: result.message });

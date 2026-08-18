@@ -1520,12 +1520,18 @@ paths:
       parameters:
         - name: orderNo
           in: query
+          description: 模糊匹配订单号；若为纯数字，同时精确匹配内部 orderId
           schema:
             type: string
         - name: userId
           in: query
           schema:
             type: integer
+        - name: phone
+          in: query
+          description: 用户手机号精确匹配（与 userId 二选一，供客服按 C 端登录手机号查单）
+          schema:
+            type: string
         - name: merchantId
           in: query
           schema:
